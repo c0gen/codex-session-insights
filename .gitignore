@@ -1,0 +1,13 @@
+.venv/
+.local-data/
+.pytest_cache/
+__pycache__/
+*.egg-info/
+node_modules/
+build/
+dist/
+release/
+*.sqlite*
+*.log
+*.codex-insights
+!tests/fixtures/*.codex-insights

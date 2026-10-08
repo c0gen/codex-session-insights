@@ -1,0 +1,95 @@
+name: Test and build
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m pytest -q
+      - run: npm ci && npm run build
+        working-directory: frontend
+  windows:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m venv .venv
+      - run: .venv/Scripts/python -m pip install -e '.[dev]'
+      - run: .venv/Scripts/python -m pytest -q
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: ./scripts/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: release/*.zip
+  mac:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15-intel
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e '.[dev,mac-build]'
+      - run: python -m pytest -q
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: python setup_mac.py py2app
+      - name: Verify exporter and create archive
+        run: |
+          APP=$(find dist -maxdepth 1 -name '*.app' -print -quit)
+          BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP/Contents/Info.plist")"
+          "$BIN" --data-dir "$RUNNER_TEMP/insights-demo" --demo export --output "$RUNNER_TEMP/demo.codex-insights"
+          mkdir -p release
+          ditto -c -k --sequesterRsrc --keepParent "$APP" release/CodexInsightsExporter-0.1.0-macos-intel.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: release/*.zip
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [test, windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - run: cd release && sha256sum *.zip > SHA256SUMS.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --title "Codex Session Insights $GITHUB_REF_NAME" --notes "Windows dashboard and Intel Mac usage exporter. Local processing, compact snapshots, live refresh and offline HTML reports. Builds are unsigned; macOS exporter requires macOS 12+."
