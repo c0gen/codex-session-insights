@@ -78,7 +78,7 @@ def validate_fact(fact):
     return fact
 
 
-def export_snapshot(store, destination, label="This computer"):
+def export_snapshot(store, destination, label="This computer", progress=None, cancel=None):
     destination = Path(destination).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     revision = store.setting("export_revision", 0) + 1
@@ -93,12 +93,16 @@ def export_snapshot(store, destination, label="This computer"):
             rows = db.execute("SELECT c.segment_id,c.fact FROM candidates c JOIN sources s ON s.id=c.source_id LEFT JOIN canonical k ON k.segment_id=c.segment_id WHERE s.kind='folder' AND s.enabled=1 ORDER BY c.segment_id,CASE WHEN c.source_id=k.source_id THEN 0 ELSE 1 END,c.record_count DESC,c.source_id")
             previous = None
             for row in rows:
+                if cancel and cancel.is_set():
+                    raise InterruptedError('Export cancelled')
                 if row[0] == previous:
                     continue
                 previous = row[0]
                 fact = validate_fact(unpack(row[1]))
                 line = (dumps(fact) + "\n").encode("utf-8")
                 output.write(line); checksum.update(line); count += 1
+                if progress and count % 50 == 0:
+                    progress({'sessions':count,'phase':'Exporting usage facts'})
         manifest = {"format": "codex-session-insights", "format_version": FORMAT_VERSION,
                     "exporter_version": __version__, "exporter_id": exporter_id, "revision": revision,
                     "label": str(label)[:200], "created_at": datetime.now(timezone.utc).isoformat(),
@@ -112,7 +116,7 @@ def export_snapshot(store, destination, label="This computer"):
     return {"path": str(destination), "sessions": count, "bytes": destination.stat().st_size, "revision": revision}
 
 
-def import_snapshot(store, path):
+def import_snapshot(store, path, progress=None, cancel=None):
     path = Path(path).resolve()
     with zipfile.ZipFile(path) as bundle:
         if sorted(bundle.namelist()) != ["facts.jsonl", "manifest.json"]:
@@ -155,6 +159,8 @@ def import_snapshot(store, path):
                     line = stream.readline(MAX_LINE + 1)
                     if not line:
                         break
+                    if cancel and cancel.is_set():
+                        raise InterruptedError('Import cancelled')
                     if len(line) > MAX_LINE or not line.endswith(b"\n"):
                         raise ValueError("Invalid or oversized fact record")
                     fact = validate_fact(loads(line.decode("utf-8")))
@@ -162,9 +168,13 @@ def import_snapshot(store, path):
                         raise ValueError("Duplicate session segment in snapshot")
                     seen.add(fact["segment_id"]); segments.add(fact["segment_id"])
                     store.put_candidate(db, source_id, fact); count += 1
+                    if progress and count % 50 == 0:
+                        progress({'sessions':count,'phase':'Reading snapshot facts'})
             if count != manifest.get("fact_count"):
                 raise ValueError("Snapshot session count does not match")
             changed = {s for s in segments if store.choose_canonical(db, s)}
+            if progress:
+                progress({'sessions':count,'phase':'Updating dashboard index'})
             project_segments(store, db, store.related_segments(db, changed, previous_sessions))
             db.execute("INSERT OR REPLACE INTO settings VALUES('data_revision',?)", (json.dumps(store.setting("data_revision", 0) + 1),))
             shutil.copyfile(path, backup)

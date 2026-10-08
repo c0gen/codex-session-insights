@@ -51,6 +51,8 @@ export interface Job {
   message: string;
   error: string | null;
   progress: {
+    sessions?: number;
+    phase?: string;
     files?: number;
     changed_files?: number;
     bytes_read?: number;

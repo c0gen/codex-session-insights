@@ -56,7 +56,7 @@ class Engine:
                     self.job.update(running=False, message="Cancelled" if self.cancel.is_set() else "Up to date", result=result)
             except Exception as exc:
                 with self.job_lock:
-                    self.job.update(running=False,message="Update failed",error=str(exc))
+                    self.job.update(running=False,message="Cancelled" if self.cancel.is_set() else "Update failed",error=None if self.cancel.is_set() else str(exc))
         self.executor.submit(work)
         return {"status":"started"}
 
@@ -158,10 +158,10 @@ class Engine:
             return self.submit("Updating included sources",update_sources)
         if action == "export":
             path = self.choose("save", "usage.codex-insights")
-            return {"status":"cancelled"} if not path else self.submit("Exporting compact usage",lambda:export_snapshot(self.store,path,self.store.setting("device_label","This computer")))
+            return {"status":"cancelled"} if not path else self.submit("Exporting compact usage",lambda:export_snapshot(self.store,path,self.store.setting("device_label","This computer"),self.progress,self.cancel))
         if action == "import":
             path = self.choose("open")
-            return {"status":"cancelled"} if not path else self.submit("Importing usage snapshot",lambda:import_snapshot(self.store,path))
+            return {"status":"cancelled"} if not path else self.submit("Importing usage snapshot",lambda:import_snapshot(self.store,path,self.progress,self.cancel))
         if action == "settings":
             zone = str(args.get("timezone",self.store.setting("timezone")))
             ZoneInfo(zone)

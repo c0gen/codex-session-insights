@@ -53,7 +53,7 @@ function sidebar() {
     .slice(0, 3)
     .map(
       (s) =>
-        `<div>${icon("laptop", 17)}<span>${esc(s.label)}</span><small><i class="dot ${s.status === "Offline" ? "offline" : s.kind === "import" ? "imported" : ""}"></i>${s.kind === "import" ? "Imported" : s.status === "Offline" ? "Offline" : "Live"}</small></div>`,
+        `<div>${icon("laptop", 17)}<span>${esc(s.label)}</span><small><i class="dot ${s.status === "Offline" ? "offline" : (s.kind === "import" || s.status === "Imported") ? "imported" : ""}"></i>${(s.kind === "import" || s.status === "Imported") ? "Imported" : s.status === "Offline" ? "Offline" : "Live"}</small></div>`,
     )
     .join(
       "",
@@ -72,7 +72,7 @@ function filterBar() {
   const select = (id: string, values: [string, string][], value: string) =>
     `<select id="${id}" aria-label="${id.replace("filter-", "")}">${values.map(([v, l]) => `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   const dates = data.timeline.length
-    ? `${dateLabel(data.timeline[0].day)} – ${dateLabel(data.timeline.at(-1)!.day)}, ${data.timeline.at(-1)!.day.slice(0, 4)}`
+    ? `${dateLabel(data.timeline[0].day)} – ${dateLabel(data.timeline[data.timeline.length - 1].day)}, ${data.timeline[data.timeline.length - 1].day.slice(0, 4)}`
     : "No activity in this range";
   return `<div class="filters ${data.readonly ? "readonly" : ""}">${select("filter-range", ranges, filters.range)}${select("filter-project", [["", "All projects"], ...data.options.projects.map((p) => [p.id, p.name] as [string, string])], filters.project_id)}${select("filter-model", [["", "All models"], ...data.options.models.map((m) => [m, m] as [string, string])], filters.model)}${select("filter-source", [["", "All sources"], ...data.sources.map((s) => [s.id, s.label] as [string, string])], filters.source_id)}<span class="date-caption">${esc(dates)}</span>${filters.range === "custom" ? `<div class="date-fields"><label>From <input id="date-start" type="date" value="${esc(filters.start)}"></label><label>To <input id="date-end" type="date" value="${esc(filters.end)}"></label><button id="date-apply" class="button small">Apply</button></div>` : ""}</div>`;
 }
@@ -145,7 +145,7 @@ function showJob(job: Job) {
   const banner = document.querySelector<HTMLElement>("#job-banner");
   if (!banner) return;
   banner.hidden = !job.running;
-  banner.innerHTML = `<span class="spinner"></span><span>${esc(job.message)}${job.progress?.files ? ` · ${count(job.progress.files)} files · ${compact((job.progress.bytes_read || 0) / 1024 / 1024)} MB read` : ""}</span><button id="cancel-job" class="text-button">Cancel</button>`;
+  banner.innerHTML = `<span class="spinner"></span><span>${esc(job.progress?.phase || job.message)}${job.progress?.sessions ? ` · ${count(job.progress.sessions)} session facts` : job.progress?.files ? ` · ${count(job.progress.files)} files · ${compact((job.progress.bytes_read || 0) / 1024 / 1024)} MB read` : ""}</span><button id="cancel-job" class="text-button">Cancel</button>`;
   on("cancel-job", () => action("cancel"));
   const label = document.querySelector("#update-label");
   if (label && job.running) label.textContent = job.message;
@@ -174,7 +174,7 @@ function bind() {
         if (name === "range" && value === "custom") {
           filters.start ||=
             data.timeline[0]?.day || new Date().toISOString().slice(0, 10);
-          filters.end ||= data.timeline.at(-1)?.day || filters.start;
+          filters.end ||= data.timeline[data.timeline.length - 1]?.day || filters.start;
           render();
         } else load();
       }),
