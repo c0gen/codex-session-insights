@@ -32,6 +32,8 @@ def main(argv=None):
     for name in ('gui','exporter','serve'):
         sub=subs.add_parser(name)
         sub.add_argument('--port',type=int,default=0)
+        if name != 'serve':
+            sub.add_argument('--smoke-result',type=Path,help=argparse.SUPPRESS)
     scan=subs.add_parser('scan');scan.add_argument('--root',action='append');scan.add_argument('--rebuild',action='store_true')
     export=subs.add_parser('export');export.add_argument('--output',type=Path,required=True);export.add_argument('--root',action='append');export.add_argument('--label')
     imp=subs.add_parser('import');imp.add_argument('snapshot',type=Path)
@@ -76,7 +78,25 @@ def main(argv=None):
                     class Bridge:
                         def call(self,action,args=None):
                             return engine.call(action,args)
-                    engine.window=webview.create_window('Codex Session Insights',url,js_api=Bridge(),width=1500 if not engine.exporter else 1000,height=960 if not engine.exporter else 720,min_size=(850,600),background_color='#10171c')
+                    smoke=getattr(args,'smoke_result',None)
+                    engine.window=webview.create_window('Codex Session Insights',url,js_api=Bridge(),width=1500 if not engine.exporter else 1000,height=960 if not engine.exporter else 720,min_size=(850,600),background_color='#10171c',hidden=bool(smoke))
+                    if smoke:
+                        def verify_native():
+                            result={'ok':False}
+                            try:
+                                engine.window.evaluate_js("window.pywebview.api.call('dashboard',{}).then(d=>window.__nativeSmoke={tokens:d.summary.total_tokens,bridge:true});")
+                                for _ in range(100):
+                                    value=engine.window.evaluate_js("({heading:document.querySelector('h1')?.textContent,bridge:window.__nativeSmoke,canvas:!!document.querySelector('canvas')})")
+                                    if value.get('heading') and value.get('bridge'):
+                                        result={'ok':True,**value};break
+                                    time.sleep(.1)
+                            except Exception as exc:
+                                result['error']=str(exc)
+                            finally:
+                                smoke.parent.mkdir(parents=True,exist_ok=True)
+                                smoke.write_text(json.dumps(result),encoding='utf-8')
+                                engine.window.destroy()
+                        engine.window.events.loaded += verify_native
                     webview.start(gui='edgechromium' if platform.system()=='Windows' else None)
             finally:
                 server.shutdown();server.server_close()
