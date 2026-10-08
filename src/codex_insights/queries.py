@@ -60,27 +60,30 @@ def dashboard(store, filters=None):
     zone_name = store.setting("timezone", "America/New_York")
     zone = ZoneInfo(zone_name)
     where, params, end = filter_clause(filters, zone)
+    table = 'metric_buckets' if store.setting('bucket_version') == 1 else 'records'
+    responses = 'sum(event_count)' if table == 'metric_buckets' else 'count(*)'
+    event_count = 'r.event_count' if table == 'metric_buckets' else '1'
     # Delayed confirmations cannot retroactively count as confirmed at an earlier cutoff.
     added = "CASE WHEN r.resolved_at < '" + end + "' THEN r.added ELSE 0 END"
     removed = "CASE WHEN r.resolved_at < '" + end + "' THEN r.removed ELSE 0 END"
-    unknown = "CASE WHEN r.kind='edit' AND r.resolved_at >= '" + end + "' THEN 1 ELSE r.unknown END"
+    unknown = "CASE WHEN r.kind='edit' AND r.resolved_at >= '" + end + "' THEN " + event_count + " ELSE r.unknown END"
     fields = "sum(r.total) total_tokens,sum(r.input) input_tokens,sum(r.cached) cached_tokens,sum(r.writes) cache_write_tokens,sum(r.output) output_tokens,sum(r.reasoning) reasoning_tokens,sum(r.cost) cost,sum(CASE WHEN r.priced=1 THEN r.total ELSE 0 END) priced_tokens,sum(r.prompts) prompts,sum(" + added + ") lines_added,sum(" + removed + ") lines_removed,sum(" + unknown + ") unknown_edits,sum(r.unsupported) unsupported_edits,sum(r.unknown_size) unknown_size_edits"
     with store.connect() as db:
-        summary = {k: v or 0 for k, v in dict(db.execute("SELECT " + fields + " FROM records r WHERE " + where, params).fetchone()).items()}
+        summary = {k: v or 0 for k, v in dict(db.execute("SELECT " + fields + " FROM " + table + " r WHERE " + where, params).fetchone()).items()}
         summary["cost"] = round(summary["cost"], 2)
-        chats = db.execute("SELECT count(DISTINCT c.session_id) FROM canonical c JOIN records r ON r.segment_id=c.segment_id WHERE c.category='top_level' AND " + where, params).fetchone()[0]
+        chats = db.execute("SELECT count(DISTINCT c.session_id) FROM canonical c JOIN " + table + " r ON r.segment_id=c.segment_id WHERE c.category='top_level' AND " + where, params).fetchone()[0]
         summary["chats"] = chats
-        timeline = [dict(row) for row in db.execute("SELECT day,sum(total) tokens,sum(cost) cost,sum(prompts) prompts,sum(" + added + ")+sum(" + removed + ") lines FROM records r WHERE " + where + " GROUP BY day ORDER BY day", params)]
+        timeline = [dict(row) for row in db.execute("SELECT day,sum(total) tokens,sum(cost) cost,sum(prompts) prompts,sum(" + added + ")+sum(" + removed + ") lines FROM " + table + " r WHERE " + where + " GROUP BY day ORDER BY day", params)]
         for row in timeline:
             row["cost"] = round(row["cost"] or 0, 4)
-        projects = [dict(row) for row in db.execute("SELECT r.project_id,c.project_label name,count(DISTINCT CASE WHEN c.category='top_level' THEN r.session_id END) chats,sum(r.total) tokens,sum(r.cost) cost,sum(" + added + ") added,sum(" + removed + ") removed,max(r.day) last_active FROM records r JOIN canonical c ON c.segment_id=r.segment_id WHERE " + where + " GROUP BY r.project_id ORDER BY tokens DESC", params)]
-        models = [dict(row) for row in db.execute("SELECT model name,sum(total) tokens,sum(cost) cost FROM records r WHERE kind='usage' AND " + where + " GROUP BY model ORDER BY tokens DESC", params)]
-        heatmap = [dict(row) for row in db.execute("SELECT weekday,hour,sum(prompts) count FROM records r WHERE prompts=1 AND " + where + " GROUP BY weekday,hour", params)]
-        tiers = [dict(row) for row in db.execute("SELECT tier name,count(*) responses,sum(total) tokens FROM records r WHERE kind='usage' AND " + where + " GROUP BY tier ORDER BY tokens DESC", params)]
-        efforts = [dict(row) for row in db.execute("SELECT effort name,count(*) responses FROM records r WHERE kind='usage' AND " + where + " GROUP BY effort ORDER BY responses DESC", params)]
-        agents = [dict(row) for row in db.execute("SELECT c.category name,count(DISTINCT r.session_id) sessions,sum(r.total) tokens FROM records r JOIN canonical c ON c.segment_id=r.segment_id WHERE " + where + " GROUP BY c.category", params)]
+        projects = [dict(row) for row in db.execute("SELECT r.project_id,c.project_label name,count(DISTINCT CASE WHEN c.category='top_level' THEN r.session_id END) chats,sum(r.total) tokens,sum(r.cost) cost,sum(" + added + ") added,sum(" + removed + ") removed,max(r.day) last_active FROM " + table + " r JOIN canonical c ON c.segment_id=r.segment_id WHERE " + where + " GROUP BY r.project_id ORDER BY tokens DESC", params)]
+        models = [dict(row) for row in db.execute("SELECT model name,sum(total) tokens,sum(cost) cost FROM " + table + " r WHERE kind='usage' AND " + where + " GROUP BY model ORDER BY tokens DESC", params)]
+        heatmap = [dict(row) for row in db.execute("SELECT weekday,hour,sum(prompts) count FROM " + table + " r WHERE prompts>0 AND " + where + " GROUP BY weekday,hour", params)]
+        tiers = [dict(row) for row in db.execute("SELECT tier name," + responses + " responses,sum(total) tokens FROM " + table + " r WHERE kind='usage' AND " + where + " GROUP BY tier ORDER BY tokens DESC", params)]
+        efforts = [dict(row) for row in db.execute("SELECT effort name," + responses + " responses FROM " + table + " r WHERE kind='usage' AND " + where + " GROUP BY effort ORDER BY responses DESC", params)]
+        agents = [dict(row) for row in db.execute("SELECT c.category name,count(DISTINCT r.session_id) sessions,sum(r.total) tokens FROM " + table + " r JOIN canonical c ON c.segment_id=r.segment_id WHERE " + where + " GROUP BY c.category", params)]
         options = {"projects": [dict(r) for r in db.execute("SELECT project_id id,project_label name FROM canonical GROUP BY project_id ORDER BY project_label")],
-                   "models": [r[0] for r in db.execute("SELECT model FROM records WHERE kind='usage' GROUP BY model ORDER BY model")]}
+                   "models": [r[0] for r in db.execute("SELECT model FROM " + table + " WHERE kind='usage' GROUP BY model ORDER BY model")]}
         diagnostics = [json.loads(r[0] or "{}") for r in db.execute("SELECT diagnostic FROM canonical")]
     active = [row["day"] for row in timeline if row["prompts"]]
     summary.update(active_days=len(active), **streaks(active, datetime.now(zone).date()))

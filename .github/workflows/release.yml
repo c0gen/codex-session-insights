@@ -43,6 +43,14 @@ jobs:
       - run: npm run build
         working-directory: frontend
       - run: ./scripts/build_windows.ps1
+      - name: Verify native Windows dashboard
+        shell: pwsh
+        run: |
+          $result = Join-Path $env:RUNNER_TEMP 'native-smoke.json'
+          $data = Join-Path $env:RUNNER_TEMP 'insights-demo'
+          $app = Start-Process dist/CodexSessionInsights/CodexSessionInsights.exe -ArgumentList '--data-dir', $data, '--demo', 'gui', '--smoke-result', $result -WindowStyle Hidden -PassThru
+          if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'Native dashboard timed out' }
+          if (-not (Get-Content $result | ConvertFrom-Json).ok) { throw 'Native dashboard verification failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -71,6 +79,7 @@ jobs:
           APP=$(find dist -maxdepth 1 -name '*.app' -print -quit)
           BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP/Contents/Info.plist")"
           "$BIN" --data-dir "$RUNNER_TEMP/insights-demo" --demo export --output "$RUNNER_TEMP/demo.codex-insights"
+          "$BIN" --data-dir "$RUNNER_TEMP/insights-demo" --demo report --output "$RUNNER_TEMP/demo-report.html"
           mkdir -p release
           ditto -c -k --sequesterRsrc --keepParent "$APP" release/CodexInsightsExporter-0.1.0-macos-intel.zip
       - uses: actions/upload-artifact@v4

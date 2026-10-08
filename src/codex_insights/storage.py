@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .codec import pack, unpack
+from .buckets import ensure_schema
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -45,9 +46,12 @@ class Store:
         self.lock = threading.RLock()
         with self.connect() as db:
             db.executescript(SCHEMA)
+            ensure_schema(db)
             db.execute("PRAGMA journal_mode=WAL")
             if not db.execute("SELECT 1 FROM settings WHERE key='exporter_id'").fetchone():
                 db.execute("INSERT INTO settings VALUES('exporter_id',?)", (json.dumps(str(uuid.uuid4())),))
+            if not db.execute('SELECT 1 FROM records LIMIT 1').fetchone():
+                db.execute("INSERT OR REPLACE INTO settings VALUES('bucket_version','1')")
 
     @contextmanager
     def connect(self):
@@ -96,6 +100,7 @@ class Store:
         if not rows:
             db.execute("DELETE FROM canonical WHERE segment_id=?", (segment_id,))
             db.execute("DELETE FROM records WHERE segment_id=?", (segment_id,))
+            db.execute("DELETE FROM metric_buckets WHERE segment_id=?", (segment_id,))
             return True
         winner = rows[0]
         fact = unpack(winner["fact"])

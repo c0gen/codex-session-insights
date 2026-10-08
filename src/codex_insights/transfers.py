@@ -90,7 +90,7 @@ def export_snapshot(store, destination, label="This computer"):
             # Canonical local candidates only: never recirculate imported snapshots.
             # Select locally observed facts even when a longer imported copy is canonical.
             # One candidate per segment; the importer will verify all copy prefixes.
-            rows = db.execute("SELECT c.segment_id,c.fact FROM candidates c JOIN sources s ON s.id=c.source_id WHERE s.kind='folder' AND s.enabled=1 ORDER BY c.segment_id,c.record_count DESC,c.source_id")
+            rows = db.execute("SELECT c.segment_id,c.fact FROM candidates c JOIN sources s ON s.id=c.source_id LEFT JOIN canonical k ON k.segment_id=c.segment_id WHERE s.kind='folder' AND s.enabled=1 ORDER BY c.segment_id,CASE WHEN c.source_id=k.source_id THEN 0 ELSE 1 END,c.record_count DESC,c.source_id")
             previous = None
             for row in rows:
                 if row[0] == previous:

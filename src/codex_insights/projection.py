@@ -7,6 +7,7 @@ from .accounting.change_accounting import event_signature
 from .accounting.pricing import estimate_token_cost
 from .accounting.token_reconciliation import reconcile_sessions
 from .codec import digest, unpack
+from .buckets import update_segment
 
 MIN = datetime.min.replace(tzinfo=timezone.utc)
 MAX = datetime.max.replace(tzinfo=timezone.utc)
@@ -28,13 +29,13 @@ def project_segments(store, db, segments):
     timezone_name = store.setting("timezone", "America/New_York")
     zone = ZoneInfo(timezone_name)
     fast = store.setting("assumed_fast_percent", 0) / 100
+    aliases = store.setting("project_aliases", {})
     lineage = Lineage(db)
     for segment_id in segments:
         row = db.execute("SELECT * FROM canonical WHERE segment_id=?", (segment_id,)).fetchone()
         if not row:
             continue
         fact = unpack(row["fact"])
-        aliases=store.setting("project_aliases", {})
         visited_projects=set()
         while fact["project_id"] in aliases and fact["project_id"] not in visited_projects:
             visited_projects.add(fact["project_id"])
@@ -66,12 +67,10 @@ def project_segments(store, db, segments):
                 writes=usage.get("cache_write_input_tokens", 0), output=usage["output_tokens"], reasoning=usage["reasoning_output_tokens"],
                 cost=price["usd"] if price else None, priced=int(bool(price)))
         # These timestamps/counts contain no text. Duplicate message envelopes were removed at parsing.
-        for message in fact.get("messages", []):
-            add("message", message["timestamp"], [segment_id, message["signature"]],
-                model=message.get("model") or "Unknown", prompts=int(message["role"] == "user"))
         seen = set()
         parent, spawn = fact.get("parent_session_id"), fact.get("spawn_timestamp")
         inherited = set()
+        inherited_messages = set()
         visited = {fact["id"]}
         while parent and parent not in visited:
             visited.add(parent)
@@ -79,7 +78,12 @@ def project_segments(store, db, segments):
             if not ancestor:
                 break
             inherited.update(event_signature(e) for e in ancestor.get("change_events", []) if e.get("call_id") and spawn and e["timestamp"] < spawn)
+            inherited_messages.update(m['signature'] for m in ancestor.get('messages',[]) if spawn and m['timestamp'] < spawn)
             parent = ancestor.get("parent_session_id")
+        for message in fact.get("messages", []):
+            if message['role'] == 'user' and message['signature'] not in inherited_messages:
+                add("message", message["timestamp"], [segment_id, message["signature"]],
+                    model=message.get("model") or "Unknown", prompts=1)
         for index, edit in enumerate(fact.get("change_events", [])):
             sig = event_signature(edit)
             if sig in seen or sig in inherited:
@@ -91,9 +95,16 @@ def project_segments(store, db, segments):
                 unknown=int(edit["outcome"] == "unknown"), unsupported=int(not edit["supported"]),
                 unknown_size=int(edit["unknown_size"] and edit["outcome"] != "failed"),
                 resolved_at=edit.get("resolved_at").isoformat() if edit.get("resolved_at") else None)
-        for t in set(fact.get("activity", [])):
+        # Date filters have whole-day precision. One presence marker per local
+        # day preserves chat/last-active queries without indexing every tool log.
+        active_days = {}
+        for t in fact.get('activity', []):
+            day=t.astimezone(zone).date()
+            active_days[day]=max(t,active_days.get(day,t))
+        for t in active_days.values():
             add("activity", t, [segment_id, "activity", t], model="Unknown")
         db.executemany("INSERT OR IGNORE INTO records(" + ",".join(COLUMNS) + ") VALUES(" + ",".join("?" for _ in COLUMNS) + ")", records)
+        update_segment(db,segment_id)
         last = max(fact.get("activity", []) or [fact["metadata_timestamp"]])
         diagnostic = json.loads(row["diagnostic"] or "{}")
         diagnostic.update(accounting=fact.get("token_reconciliation_method"),
@@ -105,8 +116,10 @@ def rebuild_projection(store):
     with store.lock, store.connect() as db:
         segments = [r[0] for r in db.execute("SELECT segment_id FROM candidates UNION SELECT segment_id FROM canonical")]
         db.execute("DELETE FROM records")
+        db.execute("DELETE FROM metric_buckets")
         for sid in segments:
             store.choose_canonical(db, sid)
         project_segments(store, db, segments)
+        db.execute("INSERT OR REPLACE INTO settings VALUES('bucket_version','1')")
         revision = store.setting("data_revision", 0) + 1
         db.execute("INSERT OR REPLACE INTO settings VALUES('data_revision',?)", (json.dumps(revision),))

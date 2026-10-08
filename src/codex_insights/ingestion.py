@@ -28,6 +28,8 @@ def refresh(store, progress=None, cancel=None, rebuild=False):
                 db.execute("UPDATE sources SET status='Offline',detail='Previously indexed history retained' WHERE id=?", (source["id"],))
             continue
         changed = set()
+        with store.connect() as db:
+            checkpoints = {row['path']:dict(row) for row in db.execute('SELECT path,offset,mtime,size,anchor FROM files WHERE source_id=?',(source['id'],))}
         def flush_changes():
             with store.lock, store.connect() as db:
                 if changed:
@@ -48,11 +50,14 @@ def refresh(store, progress=None, cancel=None, rebuild=False):
                         progress({**report, "source": source["label"]})
                     try:
                         stat = path.stat()
-                        with store.connect() as db:
-                            cached = db.execute("SELECT * FROM files WHERE source_id=? AND path=?", (source["id"], str(path))).fetchone()
+                        cached = checkpoints.get(str(path))
                         if cached and not rebuild and cached["offset"] == stat.st_size and cached["size"] == stat.st_size and cached["mtime"] == stat.st_mtime_ns:
                             continue
-                        state = unpack(cached["state"]) if cached and not rebuild else None
+                        state = None
+                        if cached and not rebuild:
+                            with store.connect() as db:
+                                saved=db.execute('SELECT state FROM files WHERE source_id=? AND path=?',(source['id'],str(path))).fetchone()
+                            state=unpack(saved[0]) if saved else None
                         if state and (state.get("version") != PARSER_VERSION or stat.st_size < cached["offset"] or anchor(path, cached["offset"]) != cached["anchor"] or (stat.st_size == cached["size"] and stat.st_mtime_ns != cached["mtime"])):
                             state = None
                         parser = SessionParser(state)

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import zipfile
+import threading
 from datetime import timedelta
 
 import pytest
@@ -120,3 +121,35 @@ def test_timezone_and_unknown_model_price(indexed):
     refresh(store);data=dashboard(store)
     assert data['summary']['total_tokens']==50 and data['summary']['priced_percent']==0
     assert data['summary']['cost']==0
+
+
+def test_cancelled_scan_commits_completed_files_and_can_resume(indexed):
+    store,root,_=indexed
+    for i in range(3):(root/f'{i}.jsonl').write_bytes(log(f'chat-{i}')+token(100))
+    cancel=threading.Event()
+    def progress(info):
+        if info['files']==2:cancel.set()
+    assert refresh(store,progress,cancel)['cancelled'] is True
+    assert dashboard(store)['summary']['total_tokens']==110
+    refresh(store)
+    assert dashboard(store)['summary']['total_tokens']==330
+
+
+def test_activity_presence_does_not_scale_with_tool_output(indexed):
+    store,root,_=indexed
+    content=log()+token(100)+b''.join(event('response_item',{'type':'function_call_output','call_id':str(i),'output':'ok'},i+10) for i in range(200))
+    (root/'verbose.jsonl').write_bytes(content);refresh(store)
+    with store.connect() as db:
+        assert db.execute("select count(*) from records where kind='activity'").fetchone()[0]==1
+    assert dashboard(store)['summary']['chats']==1
+
+
+def test_bucket_queries_match_event_queries(indexed):
+    store,root,_=indexed
+    content=log()+token(100)+token(200,4,last=100)+event('event_msg',{'type':'user_message','message':'again'},6)
+    (root/'grouped.jsonl').write_bytes(content);refresh(store)
+    grouped=dashboard(store)
+    store.set_setting('bucket_version',None)
+    original=dashboard(store)
+    for field in ('summary','timeline','projects','models','heatmap','tiers','efforts','agents'):
+        assert grouped[field]==original[field]

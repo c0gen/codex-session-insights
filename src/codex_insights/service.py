@@ -70,6 +70,9 @@ class Engine:
         return self.submit("Rebuilding index" if rebuild else "Reading session updates", lambda:refresh(self.store,self.progress,self.cancel,rebuild))
 
     def start(self):
+        if self.store.setting('bucket_version') != 1:
+            from .buckets import rebuild_buckets
+            self.submit('Updating query index',lambda:rebuild_buckets(self.store))
         if self.store.setting("demo", False):
             return
         self.refresh()

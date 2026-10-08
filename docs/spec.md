@@ -17,6 +17,7 @@ Dates use the selected IANA timezone. All-time includes indexed history through 
 - A loopback-only HTTP server serves bundled UI assets and a token-protected API. Native file dialogs run through the desktop bridge. The CLI uses the same engine without a browser.
 - One indexing worker prevents concurrent mutations. Watchdog notifications and a periodic fallback find session appends; only complete JSONL lines are consumed. Offset, mtime, size and a suffix anchor support restarts and replacement detection.
 - Raw transcript text is read for deterministic extraction, then discarded. SQLite stores compact facts and private checkpoints; timestamped metric records have indexes for date/project/model/source queries.
+- One activity marker per local day tracks chat presence. Hourly metric buckets preserve session/model/source identity and exact edit confirmation cutoffs while reducing repeated dashboard scans of large histories.
 - Source candidates are deduplicated by session ID plus metadata timestamp. Rolling byte-prefix fingerprints prove that a copy extends another; conflicting copies retain accepted history and show diagnostics. Verified parent trace replay and exact paginated boundaries are reconciled by the accounting core.
 - Imports validate version, checksum, field allowlists and counts, then replace one exporter’s candidates in a transaction. A failure rolls back. Disabled-source preferences persist. Sources can be forgotten without editing original logs.
 
