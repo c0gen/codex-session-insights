@@ -11,6 +11,9 @@ import {
   BarElement,
 } from "chart.js";
 import type { Dashboard, Day } from "./types";
+export { compact, currency } from "./format";
+import { compact, currency } from "./format";
+export { Chart };
 Chart.register(
   LineController,
   LineElement,
@@ -27,24 +30,12 @@ export const clearCharts = () => {
   charts.forEach((c) => c.destroy());
   charts = [];
 };
-export function compact(n: number, digits = 2) {
-  return Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: digits,
-  }).format(n || 0);
-}
-export function currency(n: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(n || 0);
-}
 const grid = "rgba(152,172,186,.13)",
   muted = "#a8b6c7";
 export function activity(
   data: Day[],
   mode: "tokens" | "cost" | "prompts" | "lines",
+  tokenState?: string,
 ) {
   const canvas = document.querySelector<HTMLCanvasElement>("#activity-chart");
   if (!canvas) return;
@@ -59,7 +50,7 @@ export function activity(
         labels: data.map((d) => d.day),
         datasets: [
           {
-            data: data.map((d) => d[mode] || 0),
+            data: data.map((d) => (mode === 'tokens' && tokenState === 'unavailable') || (mode === 'cost' && d.cost_available === 0) ? null : d[mode] || 0),
             borderColor: "#62e5bf",
             backgroundColor: gradient,
             fill: true,
@@ -118,14 +109,17 @@ export function activity(
 export function modelChart(data: Dashboard, mode: "tokens" | "cost") {
   const canvas = document.querySelector<HTMLCanvasElement>("#model-chart");
   if (!canvas) return;
+  // Reserve a readable row for every model instead of squeezing the bars.
+  if (canvas.parentElement)
+    canvas.parentElement.style.height = `${Math.max(280, data.models.length * 32 + 40)}px`;
   charts.push(
     new Chart(canvas, {
       type: "bar",
       data: {
-        labels: data.models.map((m) => m.name),
+        labels: data.models.map((m) => mode === "cost" && m.cost == null ? `${m.name} · Unpriced` : m.name),
         datasets: [
           {
-            data: data.models.map((m) => m[mode] || 0),
+            data: data.models.map((m) => m[mode]),
             backgroundColor: "#55caaa",
             borderRadius: 4,
             barThickness: 22,
@@ -143,7 +137,7 @@ export function modelChart(data: Dashboard, mode: "tokens" | "cost") {
             callbacks: {
               label: (c) =>
                 mode === "cost"
-                  ? currency(Number(c.raw))
+                  ? c.raw == null ? "Unpriced" : currency(Number(c.raw))
                   : compact(Number(c.raw)) + " tokens",
             },
           },
@@ -157,7 +151,10 @@ export function modelChart(data: Dashboard, mode: "tokens" | "cost") {
                 mode === "cost" ? "$" + compact(Number(v)) : compact(Number(v)),
             },
           },
-          y: { grid: { display: false }, ticks: { color: "#d3deeb" } },
+          y: {
+            grid: { display: false },
+            ticks: { color: "#d3deeb", autoSkip: false },
+          },
         },
       },
     }),

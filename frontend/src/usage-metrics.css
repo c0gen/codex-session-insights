@@ -1,0 +1,40 @@
+.usage-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-bottom: 20px; }
+.usage-metric { padding: 19px; }
+.usage-metric h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; font-size: 14px; font-weight: 500; color: var(--muted); }
+.usage-metric-value { display: block; font-size: clamp(22px, 2.4vw, 32px); overflow-wrap: anywhere; }
+.usage-metric p { color: var(--muted); line-height: 1.6; font-size: 12px; margin-bottom: 0; }
+/* Usage & Cost: tokens and cost sit in one row with the three cache and reasoning cards. */
+.usage-summary { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 13px; margin-bottom: 14px; }
+.usage-summary .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; }
+.usage-summary .usage-metrics { gap: 13px; margin-bottom: 0; }
+.usage-summary .kpi { padding: 19px; }
+.usage-summary .kpi > strong, .usage-summary .usage-metric-value { font-size: clamp(24px, 2.3vw, 34px); line-height: 1.3; letter-spacing: -0.04em; font-weight: 660; white-space: nowrap; }
+.usage-summary .usage-metric h3, .usage-summary .kpi-label { font-size: 13px; color: inherit; font-weight: 400; margin-bottom: 10px; }
+.composition-scope { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.component-list > .component-subheading { padding: 14px 0 4px; border-bottom: 0; }
+.component-subheading span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+@media (max-width: 1700px) { .usage-summary { grid-template-columns: minmax(0, 1fr); } }
+.daily-sessions { margin-bottom: 20px; min-width: 0; padding: 19px; }
+.daily-sessions .panel-heading { padding: 0 0 17px; }
+.daily-sessions .fine-print { padding: 0; }
+.daily-sessions h2 { display: flex; align-items: center; gap: 9px; }
+.daily-session-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 24px; }
+.daily-session-range { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.daily-session-legend, .daily-session-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.daily-session-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.daily-session-legend i { width: 10px; height: 10px; border-radius: 2px; }
+#daily-sessions-period { color: var(--muted); font-size: 12px; }
+.daily-session-controls label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.daily-session-controls input { color-scheme: dark; max-width: 100%; background: var(--panel); color: inherit; border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.daily-session-chart { height: 280px; margin: 18px 0; }
+.daily-sessions summary { cursor: pointer; padding: 8px 0; }
+.daily-sessions summary:focus-visible, .daily-session-table:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+.daily-session-table { overflow: auto; max-height: 380px; }
+.daily-session-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.daily-session-table caption { text-align: left; color: var(--muted); padding: 10px 0; }
+.daily-session-table th, .daily-session-table td { padding: 9px; text-align: right; border-bottom: 1px solid var(--border); }
+.daily-session-table th:first-child { text-align: left; white-space: nowrap; }
+.daily-sessions-empty { color: var(--muted); padding: 12px 0; }
+@media (max-width: 1050px) { .usage-metrics { grid-template-columns: 1fr; gap: 12px; } }
+@media (max-width: 600px) { .usage-summary .kpis { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .daily-session-chart { height: 240px; } .daily-session-table table { min-width: 430px; } }

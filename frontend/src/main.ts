@@ -1,101 +1,148 @@
+import { metricCoverage } from "./metric-coverage";
 import "./style.css";
+import "./allowance.css";
+import "./summary-image.css";
+import "./export-feedback.css";
+import { ExportFeedback } from "./export-feedback";
+import { version as appVersion } from "../package.json";
 import { call, getDashboard } from "./api";
 import { icon } from "./icons";
-import { activity, modelChart, clearCharts, compact, currency } from "./charts";
-import type { Dashboard, Filters, Job } from "./types";
-import { esc, count, dateLabel, button } from "./ui";
+import { activity, modelChart, clearCharts } from "./charts";
+import type { ActionResponse, Dashboard, Job, JobCompletion } from "./types";
+import { esc, dateLabel, button } from "./ui";
 import { overview } from "./views/overview";
 import { usage } from "./views/usage";
 import { projects } from "./views/projects";
 import { sources } from "./views/sources";
+import { syncDesktopSettings, pollDesktopSettings, setDesktopAccounts } from "./desktop-settings";
+import { showJob as updateJob, JobFeedback } from "./job-ui";
+import { captureView, restoreView, DeferredReload } from "./live-updates";
+import { ProjectMerges } from "./project-merges";
+import { DashboardAllowance } from "./allowance";
+import { updateTokenKpi } from "./token-kpi";
+import { updateTextEquivalents } from "./text-equivalents";
+import { AccountsView, accountsPage } from "./views/accounts";
+import { SummaryImageCopy, summaryImageSettings, bindSummaryImageSettings } from "./summary-image";
+import { TokenActivityPanel } from "./token-activity";
+import { DailySessionsPanel } from "./daily-sessions";
+import { renderProviderAllowances, bindProviderAllowances, bindProviderSetup } from "./provider-ui";
+import { FilterState, restoreFilters } from "./filter-state";
+import { FilterBar } from "./filter-bar";
 
 const root = document.querySelector<HTMLDivElement>("#app")!;
-let saved: Filters | null = null;
-try {
-  saved = JSON.parse(localStorage.getItem("insights-filters") || "null");
-} catch {
-  /* Ignore obsolete or damaged local preferences. */
-}
-let filters: Filters = window.__INSIGHTS_REPORT__?.filters ||
-  saved || {
-    range: "all",
-    project_id: "",
-    model: "",
-    source_id: "",
-    start: "",
-    end: "",
-  };
+let storedFilters: string | null = null;
+try { storedFilters = localStorage.getItem("insights-filters"); } catch { /* Storage may be unavailable. */ }
+const restored = restoreFilters(window.__INSIGHTS_REPORT__?.filters
+  ? JSON.stringify(window.__INSIGHTS_REPORT__.filters) : storedFilters);
+const filterState = new FilterState(restored.filters);
+const filters = filterState.draft;
+let recoveryNotice = restored.recovered;
 let data: Dashboard,
   page = "overview",
   mode: "tokens" | "cost" | "prompts" | "lines" = "tokens",
   basis: "total" | "output" = "total",
   modelMode: "tokens" | "cost" = "tokens";
-let request = 0,
-  lastJobRunning = false;
+let lastCompleted = 0, polling = false;
+const updates = new DeferredReload(() => load(true));
+const filterBar = new FilterBar(filterState, () => { void load(); }, () => updates.finishEditing());
+const feedback = new JobFeedback((message) => toast(message, true));
+const exportFeedback = new ExportFeedback();
+const allowance = new DashboardAllowance(() => {
+  updates.finishEditing();
+  page = "accounts";
+  render();
+});
+const summaryCopy = new SummaryImageCopy(toast);
+const tokenActivity = new TokenActivityPanel();
+const dailySessions = new DailySessionsPanel();
+const accounts = new AccountsView(toast, dialog, closeDialog);
+const merges = new ProjectMerges(async (name, args, state) => {
+  let result: JobCompletion | null = null;
+  await action(name, args, state, completion => { result = completion; });
+  return result;
+}, dialog, closeDialog);
+
+/** The same status words as the source cards, shortened to fit the sidebar. */
+function sourceStatus(s: Dashboard["sources"][number]) {
+  if (s.kind === "import" || s.status === "Imported") return "Imported";
+  return ({ "No supported history": "No history", "Collection disabled": "Disabled" } as Record<string, string>)[s.status] || s.status;
+}
 
 function sidebar() {
+  const enabledSources = data.sources.filter((s) => s.enabled);
   const items = [
     ["overview", "Overview", "home"],
     ["usage", "Usage & Cost", "chart"],
     ["projects", "Projects", "folder"],
+    ["accounts", "Accounts", "user"],
     ["sources", "Sources", "database"],
   ];
   return `<aside class="sidebar"><div class="brand"><span class="brand-icon">${icon("terminal", 28)}</span><div><strong>Codex</strong><span>Session Insights</span></div></div><nav aria-label="Main navigation">${items
     .filter((x) => !data.exporter || x[0] === "sources")
+    .filter((x) => !data.readonly || x[0] !== "accounts")
     .map(
       ([id, label, symbol]) =>
-        `<button data-page="${id}" class="nav-item ${page === id ? "active" : ""}">${icon(symbol, 23)}<span>${label}</span>${id === "sources" ? `<b class="badge">${data.sources.length}</b>` : ""}</button>`,
+        `<button data-page="${id}" aria-label="${label}" ${page === id ? 'aria-current="page"' : ""} class="nav-item ${page === id ? "active" : ""}">${icon(symbol, 23)}<span>${label}</span>${id === "sources" ? `<b class="badge">${data.sources.length}</b>` : ""}</button>`,
     )
     .join(
       "",
-    )}</nav><div class="sidebar-bottom"><div class="source-mini">${data.sources
-    .filter((s) => s.enabled)
+    )}</nav><div class="sidebar-bottom"><div class="source-mini">${enabledSources
     .slice(0, 3)
     .map(
       (s) =>
-        `<div>${icon("laptop", 17)}<span>${esc(s.label)}</span><small><i class="dot ${s.status === "Offline" ? "offline" : (s.kind === "import" || s.status === "Imported") ? "imported" : ""}"></i>${(s.kind === "import" || s.status === "Imported") ? "Imported" : s.status === "Offline" ? "Offline" : "Live"}</small></div>`,
+        `<div title="${esc(`${s.label} · ${sourceStatus(s)}`)}">${icon(s.kind === "import" ? "upload" : "laptop", 17)}<span>${esc(s.label)}</span><small><i class="dot ${["Offline", "No supported history", "Locked", "Unsupported", "Collection disabled"].includes(s.status) ? "offline" : (s.kind === "import" || s.status === "Imported") ? "imported" : ""}"></i>${esc(sourceStatus(s))}</small></div>`,
     )
     .join(
       "",
-    )}</div><button id="settings-open" class="local-note">${icon("shield", 20)} Local processing ${icon("settings", 17)}</button></div></aside>`;
+    )}${enabledSources.length > 3 ? `<button id="sidebar-more-sources" class="source-more">+${enabledSources.length - 3} more</button>` : ""}</div><button id="settings-open" aria-label="Settings" class="local-note">${icon("shield", 20)} Local processing ${icon("settings", 17)}</button></div></aside>`;
 }
 
-function filterBar() {
-  const ranges: [string, string][] = [
-    ["all", "All time"],
-    ["today", "Today"],
-    ["7", "Last 7 days"],
-    ["30", "Last 30 days"],
-    ["90", "Last 90 days"],
-    ["custom", "Custom dates"],
-  ];
-  const select = (id: string, values: [string, string][], value: string) =>
-    `<select id="${id}" aria-label="${id.replace("filter-", "")}">${values.map(([v, l]) => `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
-  const dates = data.timeline.length
-    ? `${dateLabel(data.timeline[0].day)} – ${dateLabel(data.timeline[data.timeline.length - 1].day)}, ${data.timeline[data.timeline.length - 1].day.slice(0, 4)}`
-    : "No activity in this range";
-  return `<div class="filters ${data.readonly ? "readonly" : ""}">${select("filter-range", ranges, filters.range)}${select("filter-project", [["", "All projects"], ...data.options.projects.map((p) => [p.id, p.name] as [string, string])], filters.project_id)}${select("filter-model", [["", "All models"], ...data.options.models.map((m) => [m, m] as [string, string])], filters.model)}${select("filter-source", [["", "All sources"], ...data.sources.map((s) => [s.id, s.label] as [string, string])], filters.source_id)}<span class="date-caption">${esc(dates)}</span>${filters.range === "custom" ? `<div class="date-fields"><label>From <input id="date-start" type="date" value="${esc(filters.start)}"></label><label>To <input id="date-end" type="date" value="${esc(filters.end)}"></label><button id="date-apply" class="button small">Apply</button></div>` : ""}</div>`;
+/** Says which slice of usage the page shows, using the applied (not draft) filters. */
+function scopeLabel() {
+  const applied = data.filters ?? filters;
+  const parts = [
+    applied.project_id ? data.options.projects.find((p) => p.id === applied.project_id)?.name : "",
+    applied.provider ? ({ codex: "Codex", claude_code: "Claude Code", antigravity: "Antigravity" } as Record<string, string>)[applied.provider] : "",
+    applied.model || "",
+    applied.source_id ? data.sources.find((s) => s.id === applied.source_id)?.label : "",
+    applied.range === "custom" && applied.start ? `${dateLabel(applied.start)} – ${dateLabel(applied.end)}`
+      : ({ today: "Today", "7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days" } as Record<string, string>)[applied.range] || "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Usage across all projects and sources";
 }
 
 function render() {
+  const view = captureView(root);
   clearCharts();
+  tokenActivity.unmount();
+  dailySessions.unmount();
   if (data.exporter) page = "sources";
   const title = {
     overview: "Overview",
     usage: "Usage & Cost",
     projects: "Projects",
+    accounts: "Accounts",
     sources: data.exporter ? "Mac Exporter" : "Sources",
   }[page];
   const content = {
-    overview: () => overview(data, mode, basis),
-    usage: () => usage(data, modelMode),
+    overview: () => overview(data, mode, basis, tokenActivity.render(data)),
+    usage: () => usage(data, modelMode, dailySessions.render(data)),
     projects: () => projects(data),
-    sources: () => sources(data),
+    accounts: () => accountsPage(),
+    sources: () => exportFeedback.render() + sources(data),
   }[page as "overview"]();
-  root.innerHTML = `${sidebar()}<main class="main"><header class="page-header"><div><div class="title-row"><h1>${title}</h1>${data.demo ? '<span class="demo-pill">Demo data</span>' : data.readonly ? '<span class="demo-pill">Saved report</span>' : ""}</div><p>${page === "sources" ? "Manage where your usage comes from" : "Usage across all projects and sources"}</p></div><div class="header-actions"><span id="update-label">${data.readonly ? "Saved snapshot" : "Updated just now"}</span>${!data.readonly ? `<button id="refresh" class="button icon-only" aria-label="Refresh insights">${icon("refresh", 21)}</button>${button("export-html", "Export HTML report", "file")}` : ""}</div></header>${page !== "sources" ? filterBar() : ""}<div id="job-banner" class="job-banner" hidden></div>${data.coverage.conflicts || data.coverage.parse_errors ? `<div class="coverage-note">${data.coverage.conflicts} unresolved copy conflicts · ${data.coverage.parse_errors} unparsed records. Accepted history is retained.</div>` : ""}${!data.summary.total_tokens && page === "overview" ? `<div class="empty-state panel"><h2>No usage in this view yet</h2><p>Choose another date range or add a folder in Sources. Your regular Codex folders are included automatically.</p><button data-page="sources" class="button primary">${icon("database")}Open Sources</button></div>` : ""}${content}<footer class="app-footer"><span>${icon("shield", 14)}Processed on this computer</span><span>Codex Session Insights · v0.1.0</span></footer></main><div id="dialog-root"></div><div id="toast" role="status" hidden></div>`;
+  root.innerHTML = `${sidebar()}<main class="main"><header class="page-header"><div><div class="title-row"><h1>${title}</h1>${data.demo ? '<span class="demo-pill">Demo data</span>' : data.readonly ? '<span class="demo-pill">Saved report</span>' : ""}</div><p>${page === "sources" ? "Manage where your usage comes from" : page === "accounts" ? "Allowance, token history, and banked resets across your accounts" : esc(scopeLabel())}</p></div><div class="header-actions"><span id="update-label">${data.readonly ? "Saved snapshot" : "Updated just now"}</span>${!data.readonly ? `<button id="refresh" class="button icon-only" aria-label="Refresh insights">${icon("refresh", 21)}</button><button id="copy-summary-image" class="button icon-only" aria-label="Copy summary as an image" title="Copy summary as an image">${icon("copy", 20)}</button>${button("export-html", "Export HTML report", "file")}` : ""}</div></header><div id="summary-image-feedback" class="summary-image-feedback" role="status" hidden></div>${page === "overview" ? '<section id="limits-row" class="limits-row" aria-label="Plan limits and allowance, independent of filters" hidden></section>' : ""}${page !== "sources" && page !== "accounts" ? filterBar.render(data) : ""}<div id="job-banner" class="job-banner" hidden></div><div id="dashboard-results" aria-busy="false">${data.coverage.conflicts || data.coverage.parse_errors ? `<div class="coverage-note">${data.coverage.conflicts} unresolved copy conflicts · ${data.coverage.parse_errors} unparsed records. Accepted history is retained.</div>` : ""}${!data.summary.chats && !data.timeline.length && page === "overview" ? `<div class="empty-state panel"><h2>No usage in this view yet</h2><p>Choose another date range or add a folder in Sources. Your regular Codex folders are included automatically.</p><button data-page="sources" class="button primary">${icon("database")}Open Sources</button></div>` : ""}${page === "accounts" ? `<div id="provider-allowance-cards">${renderProviderAllowances(data.provider_allowances, undefined, data.timezone)}</div>` : ""}${page !== "accounts" && page !== "sources" ? metricCoverage(data) : ""}${content}</div><footer class="app-footer"><span>${icon("shield", 14)}Processed on this computer</span><span>Codex Session Insights · v${appVersion}</span></footer></main>`;
   bind();
-  if (page === "overview") activity(data.timeline, mode);
+  filterBar.mount(data);
+  summaryCopy.mount(data, page);
+  document.querySelector("#export-html")?.toggleAttribute("hidden", page === "accounts");
+  allowance.mount(data.usage_limits, !!(data.demo || data.exporter || data.readonly || page === "accounts"),
+    data.provider_allowances, data.timezone, data.filters?.provider);
+  accounts.mount(!!(data.exporter || data.readonly), data.timezone);
+  if (page === "overview") activity(data.timeline, mode, data.coverage.tokens?.state);
+  if (page === "overview") tokenActivity.mount(render);
   if (page === "usage") modelChart(data, modelMode);
+  if (page === "usage") dailySessions.mount();
   if (data.readonly) {
     document
       .querySelectorAll<
@@ -105,89 +152,120 @@ function render() {
       )
       .forEach((s) => (s.disabled = true));
   }
-  showJob(data.job);
+  if (!data.readonly) showJob(data.job);
+  restoreView(root, view);
 }
 
-function toast(message: string, error = false) {
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function toast(message: string, error = false, duration = 6500) {
+  clearTimeout(toastTimer);
   const el = document.querySelector<HTMLElement>("#toast")!;
   el.textContent = message;
   el.className = error ? "error" : "";
   el.hidden = false;
-  setTimeout(() => (el.hidden = true), 6500);
+  toastTimer = setTimeout(() => (el.hidden = true), duration);
 }
-async function load() {
-  const id = ++request;
+async function load(automatic = false) {
+  let pending;
+  try { pending = filterState.begin(automatic); }
+  catch (e) { toast(e instanceof Error ? e.message : String(e), true); return; }
+  if (!pending) return;
+  // Establish the user request before releasing any queued background reload.
+  if (!automatic) updates.finishEditing();
+  summaryCopy.setLoading(true);
+  if (data) {
+    if (automatic) filterBar.feedback();
+    else filterBar.refresh(data);
+  }
   try {
-    const next = await getDashboard(filters);
-    if (id !== request) return;
-    data = next;
+    const next = await getDashboard({ ...pending.filters });
+    if (!filterState.current(pending)) return;
+    // An editor may have opened while the dashboard query was in flight.
+    if (automatic && updates.editing()) {
+      filterState.finish(pending);
+      summaryCopy.setLoading(false);
+      filterBar.feedback();
+      updates.request();
+      return;
+    }
+    const applied = filterState.accept(pending, next.filters ?? pending.filters)!;
+    data = { ...next, filters: applied };
+    if (!data.readonly) {
+      try { localStorage.setItem("insights-filters", JSON.stringify(applied)); } catch { /* The view still works without preferences. */ }
+    }
+    summaryCopy.setLoading(false);
     render();
+    const cleared = (["project_id", "source_id", "model"] as const)
+      .filter(key => pending.filters[key] && !applied[key]);
+    if (cleared.length) toast("Some selected filters were no longer available and were cleared. Other filters were kept.");
+    if (recoveryNotice) {
+      recoveryNotice = false;
+      toast("Saved filters were invalid and have been reset to All time. You can choose a new range above.");
+    }
   } catch (e) {
+    if (!filterState.current(pending)) return;
+    filterState.fail(pending, e instanceof Error ? e.message : String(e));
+    summaryCopy.setLoading(false);
+    filterBar.feedback();
     if (data) toast(String(e), true);
     else
       root.innerHTML = `<div class="startup-error"><h1>Couldn’t open insights</h1><p>${esc(e)}</p><button onclick="location.reload()">Try again</button></div>`;
   }
 }
-async function action(name: string, args: unknown = {}) {
+async function action(name: string, args: unknown = {}, state?: (value: "queued" | "running") => void, completed?: (value: JobCompletion) => void) {
   try {
-    const result = await call<{ status?: string }>(name, args);
-    if (result?.status === "busy")
-      toast("An update is already running. Please wait or cancel it.");
-    else if (result?.status !== "cancelled") await load();
+    const result = await call<ActionResponse>(name, args);
+    if (result?.status === "cancelled") return false;
+    if (result?.status === "stopping") throw new Error("The app is closing.");
+    if (result?.job_id !== undefined) {
+      const completion = feedback.wait(result, state);
+      state?.(result.status === "queued" ? "queued" : "running");
+      if (result.status === "queued") toast(`Queued · ${result.message}`);
+      try {
+        const job = await call<Job>("status");
+        showJob(job);
+        feedback.observe(job);
+      } catch { /* Polling can still observe an accepted job. */ }
+      const finished = await completion;
+      exportFeedback.observe(finished);
+      completed?.(finished);
+      updates.request();
+      return finished.state === "completed";
+    }
+    if (result?.status !== "cancelling") updates.request();
+    return true;
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e), true);
+    return false;
   }
 }
 function on(id: string, callback: () => void) {
   document.getElementById(id)?.addEventListener("click", callback);
 }
 function showJob(job: Job) {
-  const banner = document.querySelector<HTMLElement>("#job-banner");
-  if (!banner) return;
-  banner.hidden = !job.running;
-  banner.innerHTML = `<span class="spinner"></span><span>${esc(job.progress?.phase || job.message)}${job.progress?.sessions ? ` · ${count(job.progress.sessions)} session facts` : job.progress?.files ? ` · ${count(job.progress.files)} files · ${compact((job.progress.bytes_read || 0) / 1024 / 1024)} MB read` : ""}</span><button id="cancel-job" class="text-button">Cancel</button>`;
-  on("cancel-job", () => action("cancel"));
-  const label = document.querySelector("#update-label");
-  if (label && job.running) label.textContent = job.message;
+  updateJob(job, () => { void action("cancel"); });
 }
+function openWidgetAccount(id: string) {
+  updates.finishEditing();
+  closeDialog();
+  page = "accounts";
+  render();
+  accounts.focusAccount(id);
+}
+
 function bind() {
   document.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(
     (b) =>
       (b.onclick = () => {
+        updates.finishEditing();
         page = b.dataset.page!;
         render();
       }),
   );
-  ["range", "project", "model", "source"].forEach((name) =>
-    document
-      .querySelector<HTMLSelectElement>("#filter-" + name)
-      ?.addEventListener("change", (event) => {
-        const value = (event.target as HTMLSelectElement).value;
-        const key = {
-          range: "range",
-          project: "project_id",
-          model: "model",
-          source: "source_id",
-        }[name] as keyof Filters;
-        filters[key] = value;
-        localStorage.setItem("insights-filters", JSON.stringify(filters));
-        if (name === "range" && value === "custom") {
-          filters.start ||=
-            data.timeline[0]?.day || new Date().toISOString().slice(0, 10);
-          filters.end ||= data.timeline[data.timeline.length - 1]?.day || filters.start;
-          render();
-        } else load();
-      }),
-  );
-  on("date-apply", () => {
-    filters.start = (
-      document.querySelector("#date-start") as HTMLInputElement
-    ).value;
-    filters.end = (
-      document.querySelector("#date-end") as HTMLInputElement
-    ).value;
-    localStorage.setItem("insights-filters", JSON.stringify(filters));
-    load();
+  on("sidebar-more-sources", () => {
+    updates.finishEditing();
+    page = "sources";
+    render();
   });
   document.querySelectorAll<HTMLButtonElement>("[data-activity]").forEach(
     (b) =>
@@ -214,14 +292,28 @@ function bind() {
     const el = document.querySelector<HTMLElement>("#extra-equivalents")!;
     el.hidden = !el.hidden;
   });
-  on("refresh", () => action("refresh"));
+  on("refresh", () => page === "accounts" ? void call("account_refresh", { refresh_local: true }).then(() => accounts.poll()).catch(e => toast(String(e), true)) : action("refresh"));
   on("rebuild-index", () => action("refresh", { rebuild: true }));
-  on("add-source", () => action("add_source"));
+  bindProviderSetup(root, async (target, operation) => {
+    if (operation === "preview") {
+      const preview = await call("provider_setup_preview", { target });
+      dialog("Configuration preview", `<pre>${esc(JSON.stringify(preview, null, 2))}</pre>`, "", () => {});
+    } else {
+      await action("provider_setup", { target, operation });
+      await load();
+    }
+  });
+  on("add-source", () => dialog("Add session folder", `<label>Tool <select id="source-provider"><option value="codex">Codex</option><option value="claude_code">Claude Code</option><option value="antigravity">Antigravity (public transcripts)</option></select></label><p>For Antigravity, choose its brain folder. Public transcripts and official hooks supply recorded usage.</p>`, `<button id="source-choose" class="button primary">Choose folder</button>`, () => on("source-choose", () => {
+    const provider = document.querySelector<HTMLSelectElement>("#source-provider")!.value;
+    closeDialog();
+    void action("add_source", { provider });
+  })));
   on("import-snapshot", () => action("import"));
   on("export-snapshot", () => action("export"));
   on("settings-open", settings);
   on("settings-inline", settings);
-  on("export-html", () =>
+  on("export-html", () => {
+    const exportFilters = filterState.exportSnapshot();
     dialog(
       "Export HTML report",
       `<p>Save this filtered view as a standalone, offline report.</p><label class="toggle-label"><input id="anonymous" type="checkbox" checked> Replace project and source names with generic labels</label>`,
@@ -232,19 +324,29 @@ function bind() {
             document.querySelector("#anonymous") as HTMLInputElement
           ).checked;
           closeDialog();
-          action("export_html", { filters, anonymous });
+          action("export_html", { filters: exportFilters, anonymous });
         }),
-    ),
-  );
+    );
+  });
   document
     .querySelectorAll<HTMLInputElement>("[data-enabled]")
     .forEach(
       (el) =>
-        (el.onchange = () =>
-          action("source_enabled", {
+        (el.onchange = async () => {
+          const checked = el.checked;
+          el.disabled = true;
+          el.setAttribute("data-pending-edit", "true");
+          const saved = await action("source_enabled", {
             id: el.dataset.enabled,
-            enabled: el.checked,
-          })),
+            enabled: checked,
+          });
+          if (el.isConnected) {
+            el.removeAttribute("data-pending-edit");
+            el.disabled = false;
+            if (!saved) el.checked = !checked;
+          }
+          void updates.flush();
+        }),
     );
   document.querySelectorAll<HTMLButtonElement>("[data-forget]").forEach(
     (el) =>
@@ -257,47 +359,17 @@ function bind() {
           action("forget_source", { id: el.dataset.forget });
       }),
   );
-  document
-    .querySelector<HTMLInputElement>("#project-search")
-    ?.addEventListener("input", (event) => {
-      const text = (event.target as HTMLInputElement).value.toLowerCase();
-      document
-        .querySelectorAll<HTMLTableRowElement>("tbody tr")
-        .forEach(
-          (row) =>
-            (row.hidden = !row.textContent!.toLowerCase().includes(text)),
-        );
-    });
   document.querySelectorAll<HTMLTableRowElement>("tr[data-project]").forEach(
     (row) =>
       (row.onclick = (event) => {
-        if (data.readonly || (event.target as Element).closest("button"))
+        if (data.readonly || (event.target as Element).closest("button,input,.project-check"))
           return;
         filters.project_id = row.dataset.project!;
         page = "overview";
         load();
       }),
   );
-  document.querySelectorAll<HTMLButtonElement>(".merge-project").forEach(
-    (b) =>
-      (b.onclick = () =>
-        dialog(
-          "Merge project group",
-          `<p>Group this workspace with an existing project. Usage is recalculated; original chats stay in place.</p><label>Target project<select id="merge-target">${data.options.projects
-            .filter((p) => p.id !== b.dataset.id)
-            .map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`)
-            .join("")}</select></label>`,
-          `<button id="merge-save" class="button primary">Merge groups</button>`,
-          () =>
-            on("merge-save", () => {
-              const target = (
-                document.querySelector("#merge-target") as HTMLSelectElement
-              ).value;
-              closeDialog();
-              action("alias", { source: b.dataset.id, target });
-            }),
-        )),
-  );
+  merges.bind(data);
 }
 function dialog(
   title: string,
@@ -315,30 +387,100 @@ function dialog(
 }
 function closeDialog() {
   document.querySelector("#dialog-root")!.innerHTML = "";
+  void updates.flush();
+}
+function validTimezone(zone: string) {
+  if (!zone) return false;
+  try { new Intl.DateTimeFormat("en-US", { timeZone: zone }); return true; } catch { return false; }
+}
+/** Suggestions where the browser can list zones (not Safari 15); typing any IANA name still works. */
+function timezoneOptions() {
+  const supported = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+  if (!supported) return "";
+  try { return `<datalist id="timezone-options">${supported("timeZone").map(zone => `<option value="${esc(zone)}"></option>`).join("")}</datalist>`; }
+  catch { return ""; }
 }
 function settings() {
   dialog(
     "Settings",
-    `<label>Computer label<input id="device-label" value="${esc(data.settings.device_label)}"></label><label>Display timezone<input id="timezone" value="${esc(data.timezone)}" placeholder="America/New_York"></label><label>Assumed Fast share for unlogged tiers (%)<input id="fast-share" type="number" min="0" max="100" value="${data.settings.assumed_fast_percent}"></label><p class="fine-print">Observed tiers always take precedence. Changing timezone or pricing recalculates stored usage.</p><button id="pricing-import" class="button">${icon("upload")}Import pricing catalog</button>`,
-    `<button id="settings-save" class="button primary">Save settings</button>`,
+    `<h3 class="settings-section">General</h3><label>Computer label<input id="device-label" value="${esc(data.settings.device_label)}"></label><label>Display timezone<input id="timezone" value="${esc(data.timezone)}" placeholder="America/New_York" list="timezone-options" autocomplete="off" spellcheck="false"></label>${timezoneOptions()}<p id="timezone-error" class="settings-error" role="alert" hidden></p>${!data.exporter ? summaryImageSettings() : ""}<h3 class="settings-section">Pricing</h3><label>Assumed Fast share for unlogged tiers (%)<input id="fast-share" type="number" min="0" max="100" value="${data.settings.assumed_fast_percent}"></label><p class="fine-print">Observed tiers always take precedence. Changing timezone or pricing recalculates stored usage.</p><button id="pricing-import" class="button">${icon("upload")}Import pricing catalog</button>${!data.demo && !data.exporter ? `<h3 class="settings-section">Live account data</h3><label class="toggle-label"><input id="live-usage-enabled" type="checkbox" ${data.settings.live_usage_enabled !== false ? "checked" : ""}> Fetch live account data</label><p class="fine-print">Uses installed Codex and your existing ChatGPT sign-in. Refreshes allowance every 60 seconds and account history every five minutes. Account data stays in memory and is excluded from exports.</p><label class="toggle-label"><input id="claude-usage-enabled" type="checkbox" ${data.settings.claude_usage_enabled ? "checked" : ""}> Check Claude plan limits</label><p class="fine-print">Runs your installed Claude Code's <code>/usage</code> command every five minutes for the 5-hour and weekly limits. Claude Code signs in on its own: this app never reads Claude credentials and makes no model requests. Readings stay in memory and are excluded from exports.</p><label class="toggle-label"><input id="antigravity-usage-enabled" type="checkbox" ${data.settings.antigravity_usage_enabled ? "checked" : ""}> Check Antigravity allowance</label><p class="fine-print">Runs the official Antigravity CLI’s read-only <code>/usage</code> command every five minutes. Install agy and sign in there. No model turn is started. Readings stay in memory and are excluded from exports.</p>` : ""}`,
+    `<button id="settings-cancel" class="button">Cancel</button><button id="settings-save" class="button primary">Save settings</button>`,
     () => {
+      on("settings-cancel", closeDialog);
+      bindSummaryImageSettings(toast);
+      document.querySelector<HTMLInputElement>("#live-usage-enabled")?.addEventListener("change", async event => {
+        const input = event.target as HTMLInputElement;
+        input.disabled = true;
+        const enabled = input.checked;
+        const saved = await action("usage_limits_settings", { enabled });
+        if (saved) {
+          data.settings.live_usage_enabled = enabled;
+          if (data.usage_limits) data.usage_limits.enabled = enabled;
+          await allowance.poll();
+        } else input.checked = !enabled;
+        input.disabled = false;
+      });
+      for (const provider of ["claude", "antigravity"] as const) {
+        document.querySelector<HTMLInputElement>(`#${provider}-usage-enabled`)?.addEventListener("change", async event => {
+          const input = event.target as HTMLInputElement;
+          input.disabled = true;
+          const enabled = input.checked;
+          const saved = await action(`${provider}_usage_settings`, { enabled });
+          if (saved) {
+            data.settings[`${provider}_usage_enabled`] = enabled;
+            await pollProviderAllowances();
+          } else input.checked = !enabled;
+          input.disabled = false;
+        });
+      }
+      if (data.desktop?.available) {
+        const section = document.createElement("section");
+        section.id = "desktop-preferences";
+        document.querySelector(".modal-body")!.append(section);
+        syncDesktopSettings(data.desktop, allowance.snapshot());
+        pollDesktopSettings(settings).catch(() => {});
+      }
       on("pricing-import", () => {
         closeDialog();
         action("import_pricing");
       });
-      on("settings-save", () => {
+      on("settings-save", async () => {
+        const modal = document.querySelector<HTMLElement>('[role="dialog"]')!;
+        const save = modal.querySelector<HTMLButtonElement>("#settings-save")!;
+        const zone = modal.querySelector<HTMLInputElement>("#timezone")!;
+        const zoneError = modal.querySelector<HTMLElement>("#timezone-error")!;
+        if (!validTimezone(zone.value.trim())) {
+          zoneError.textContent = `“${zone.value}” isn’t a recognized IANA timezone, such as America/New_York or Europe/London.`;
+          zoneError.hidden = false;
+          zone.setAttribute("aria-invalid", "true");
+          zone.focus();
+          return;
+        }
+        zoneError.hidden = true;
+        zone.removeAttribute("aria-invalid");
         const args = {
           device_label: (
             document.querySelector("#device-label") as HTMLInputElement
           ).value,
-          timezone: (document.querySelector("#timezone") as HTMLInputElement)
-            .value,
+          timezone: zone.value.trim(),
           assumed_fast_percent: Number(
             (document.querySelector("#fast-share") as HTMLInputElement).value,
           ),
         };
-        closeDialog();
-        action("settings", args);
+        const inputs = Array.from(modal.querySelectorAll<HTMLInputElement>("#device-label,#timezone,#fast-share"));
+        inputs.forEach((input) => input.disabled = true);
+        save.disabled = true;
+        const saved = await action("settings", args, (state) => {
+          save.textContent = state === "queued" ? "Queued" : "Saving…";
+        });
+        if (saved) {
+          if (modal.isConnected) closeDialog();
+          toast("Settings saved.");
+        } else {
+          inputs.forEach((input) => input.disabled = false);
+          save.disabled = false;
+          save.textContent = "Save settings";
+        }
       });
     },
   );
@@ -346,23 +488,65 @@ function settings() {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDialog();
 });
+document.body.insertAdjacentHTML("beforeend", '<div id="dialog-root"></div><div id="toast" role="status" hidden></div>');
 root.innerHTML =
   '<div class="loading"><span class="spinner"></span>Opening your insights…</div>';
 load();
+window.addEventListener("pywebviewready", () => { if (data) summaryCopy.mount(data, page); });
+if (!window.__INSIGHTS_REPORT__)
+  setInterval(() => { void allowance.poll().catch(() => {}); }, 2000);
 if (!window.__INSIGHTS_REPORT__)
   setInterval(async () => {
+    await accounts.poll();
+    const snapshot = accounts.snapshot();
+    setDesktopAccounts(snapshot);
+    if (data && snapshot?.token_total) {
+      data.account_token_total = snapshot.token_total;
+      updateTokenKpi(data);
+      updateTextEquivalents(data, basis);
+    }
+  }, 2000);
+if (!window.__INSIGHTS_REPORT__)
+  setInterval(async () => {
+    if (polling) return;
+    polling = true;
     try {
       const job = await call<Job>("status");
       showJob(job);
-      if (
-        data &&
-        (job.revision !== data.revision || (lastJobRunning && !job.running))
-      ) {
-        await load();
-        if (job.error) toast(job.error, true);
+      feedback.observe(job);
+      const finished = (job.completed || []).filter((item) => item.id > lastCompleted);
+      for (const item of finished) lastCompleted = Math.max(lastCompleted, item.id);
+      if (data && (job.revision !== data.revision || finished.length)) {
+        updates.request();
       }
-      lastJobRunning = job.running;
+      if (data?.desktop?.available) await pollDesktopSettings(settings, openWidgetAccount);
     } catch {
       /* A closing desktop window shuts down the server. */
-    }
+    } finally { polling = false; }
   }, 2000);
+
+let providerPolling = false;
+async function pollProviderAllowances() {
+  if (!data || providerPolling) return;
+  providerPolling = true;
+  try {
+    data.provider_allowances = await call("provider_allowances");
+    allowance.setProviders(data.provider_allowances);
+    const cards = root.querySelector<HTMLElement>("#provider-allowance-cards");
+    const markup = renderProviderAllowances(data.provider_allowances, undefined, data.timezone);
+    if (cards && cards.dataset.markup !== markup) {
+      const refocus = cards.contains(document.activeElement) && document.activeElement?.matches("[data-provider-usage-refresh]");
+      cards.innerHTML = markup;
+      cards.dataset.markup = markup;
+      if (refocus) cards.querySelector<HTMLElement>("[data-provider-usage-refresh]")?.focus({ preventScroll: true });
+    }
+  } catch { /* Closing clients leave the last reading visible with expiry. */ }
+  finally { providerPolling = false; }
+}
+if (!window.__INSIGHTS_REPORT__) {
+  bindProviderAllowances(root, async provider => {
+    await call(provider === "antigravity" ? "refresh_antigravity_usage" : "refresh_claude_usage");
+    await pollProviderAllowances();
+  });
+  setInterval(() => { void pollProviderAllowances(); }, 2000);
+}

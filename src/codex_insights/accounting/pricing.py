@@ -615,6 +615,7 @@ def estimate_token_cost(
 
     return {
         "usd": usd,
+        "cache_discount_usd": cached_input_tokens * (rates["input"] - rates["cached_input"]) / 1_000_000,
         "pricing_model": rates["pricing_model"],
         "rates_per_million": {
             "input": rates["input"],

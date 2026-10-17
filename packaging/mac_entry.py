@@ -1,8 +1,4 @@
-import sys
-from codex_insights.cli import main
+from codex_insights.launcher import launch
 
 if __name__ == '__main__':
-    args=sys.argv[1:]
-    if not args:
-        args=['exporter']
-    raise SystemExit(main(args))
+    raise SystemExit(launch(default_command='exporter'))

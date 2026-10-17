@@ -1,2 +1,2 @@
-from .cli import main
-raise SystemExit(main())
+from .launcher import launch
+raise SystemExit(launch())

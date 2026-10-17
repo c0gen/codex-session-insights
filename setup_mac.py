@@ -2,14 +2,17 @@
 from setuptools import setup
 import os
 from pathlib import Path
+import tomllib
 
 # py2app rejects install_requires. Keep this bundle setup separate from the
 # root pyproject.toml; dependencies have already been installed by pip.
 root=Path(__file__).resolve().parent
+version=tomllib.loads((root/'pyproject.toml').read_text())['project']['version']
 os.chdir(root/'packaging')
 
 setup(name='Codex Insights Exporter',app=[{'script':'mac_entry.py','dest_base':'Codex Insights Exporter'}],options={'py2app':{
-    'packages':['codex_insights','webview','watchdog','tzdata','tzlocal'],
+    'packages':['codex_insights','webview','watchdog','tzdata','tzlocal','cryptography'],
+    'extra_scripts':[str(root/'packaging/bridge_entry.py')],
     'resources':[str(root/'frontend/dist'),str(root/'LICENSE'),str(root/'THIRD_PARTY_NOTICES.md')],
     'dist_dir':str(root/'dist'),'bdist_base':str(root/'build/mac'),
     'excludes':['pytest','tkinter','PyInstaller','setuptools','wheel','pip','test','webview.__pyinstaller',
@@ -17,6 +20,6 @@ setup(name='Codex Insights Exporter',app=[{'script':'mac_entry.py','dest_base':'
         'webview.platforms.edgechromium','webview.platforms.mshtml','webview.platforms.cef'],
     'arch':'x86_64','argv_emulation':False,
     'plist':{'CFBundleName':'Codex Insights Exporter','CFBundleDisplayName':'Codex Insights Exporter',
-        'CFBundleIdentifier':'io.github.c0gen.codex-insights-exporter','CFBundleShortVersionString':'0.1.0',
+        'CFBundleIdentifier':'io.github.c0gen.codex-insights-exporter','CFBundleShortVersionString':version,
         'LSMinimumSystemVersion':'12.0','NSHighResolutionCapable':True},
 }})

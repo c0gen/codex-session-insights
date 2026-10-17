@@ -4,21 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-session-insights"
-version = "0.1.0"
+version = "0.1.4"
 description = "A local desktop dashboard and compact exporter for Codex session usage"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-dependencies = ["tzdata>=2025.1", "tzlocal>=5", "watchdog>=6", "pywebview>=6"]
+dependencies = ["tzdata>=2025.1", "tzlocal>=5", "watchdog>=6", "pywebview>=6", "cryptography>=50.0.2,<51"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyinstaller>=6.16"]
+dev = ["pytest>=8", "pyinstaller>=6.16", "pefile>=2024.8.26", "capstone>=5", "protobuf>=7"]
 mac-build = ["py2app>=0.28"]
 
 [project.scripts]
-codex-insights = "codex_insights.cli:main"
+codex-insights = "codex_insights.launcher:launch"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+codex_insights = ["assets/*.ico", "providers/legacy/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -1,0 +1,40 @@
+{
+  "owner": "Replay accounting",
+  "bug_ids": ["B2"],
+  "outcome": "Scoped implementation and regression tests complete; automatic existing-index upgrade remains assigned to integration.",
+  "changed_files": [
+    "src/codex_insights/accounting/token_reconciliation.py",
+    "tests/test_replay_origin.py",
+    "docs/bugfix-plans/status/replay.json"
+  ],
+  "changes": [
+    "Verified prefix matching now requires identical original child/parent event timestamps in addition to matching cumulative and last-usage tuples, with a known spawn boundary and parent event at or before that boundary.",
+    "Known independent post-spawn child responses remain counted even when their full counters match the parent, including different model context.",
+    "Missing spawn information and ambiguous unmatched pre-spawn counters remain unreconciled rather than claiming observed independent usage.",
+    "Exact and offset inherited prefixes, partial-prefix termination, startup baselines, counter resets, late parents and explicit portable history boundaries remain covered."
+  ],
+  "tests": [
+    {
+      "command": ".venv/Scripts/python.exe -m pytest tests/test_replay_origin.py -q --basetemp=.local-data/b2-replay-origin-repro-20261011",
+      "result": "Before implementation: 2 expected failures reproduced 110 tokens instead of 220, for both matching and different child models."
+    },
+    {
+      "command": ".venv/Scripts/python.exe -m pytest tests/test_replay_origin.py tests/test_accounting.py tests/test_engine.py -q --basetemp=.local-data/b2-replay-origin-focused-20261011",
+      "result": "36 passed in 9.28s, including 22 new replay-origin cases."
+    }
+  ],
+  "portable_fact_repair": {
+    "verified": true,
+    "description": "Synthetic sessions exported and imported into isolated stores without physical-path facts. After simulating a stale child usage projection, rebuild_projection restored independent parent-plus-child usage to 220 and kept genuine replay at 110. Canonical fact blobs and synthetic source bytes remained unchanged.",
+    "fact_schema_change_required": false
+  },
+  "required_integration_work": [
+    "Introduce or advance a persisted accounting/projection version, and schedule a one-time re-projection for pre-fix indexes on startup/refresh. Do not rely solely on PARSER_VERSION or unchanged-file scanning: offline and imported facts already contain the timestamps necessary for repair.",
+    "Rebuild usage records, metric buckets and canonical replay diagnostics from all affected stored facts (or all canonical segments), including imported/offline sources. Existing rebuild_projection exercises the required recalculation and increments data_revision.",
+    "Mark the accounting/projection version current only after successful completion. Preserve an idempotent restart/retry path and invalidate dependent dashboard/widget/local-burn caches through the data revision.",
+    "Do not just bump bucket_version and rebuild buckets: that would aggregate the stale usage records without rerunning reconciliation. No B2 parser schema change, log rewrite, or snapshot rewrite is needed.",
+    "Run combined validation after all owners finish; this chat only ran the assigned replay/accounting/engine suites."
+  ],
+  "unresolved_issues": [],
+  "optional_notification": "notify_andy tools were not available in this chat; no external notification was sent."
+}

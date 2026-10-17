@@ -1,0 +1,27 @@
+.project-merge-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 0 22px 12px; }
+.project-merge-actions small { color: var(--muted); }
+#project-merge-status { margin: 0; padding: 0 22px 12px; font-size: 13px; color: var(--muted); }
+#project-merge-status:empty { display: none; }
+#project-merge-status.error, #merge-feedback.error { color: #e5a698; }
+.projects-panel th.project-check, .projects-panel td.project-check { width: 42px; padding-right: 0; }
+/* 160+ projects are common, so rows stay compact and the columns fit a 1250px window. */
+.projects-table th { padding: 11px 14px; }
+.projects-table td { padding: 10px 14px; }
+.projects-table .numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.projects-table .project-name { max-width: 320px; }
+.projects-table .project-name > span { overflow: hidden; text-overflow: ellipsis; }
+.projects-table .project-actions { width: 1%; text-align: right; }
+.projects-table .merge-project { padding: 4px 10px; font-size: 12px; color: var(--muted); }
+.projects-table tr:hover .merge-project, .projects-table .merge-project:focus-visible { color: inherit; }
+.partial-mark { color: #d9c99e; margin-left: 2px; cursor: help; }
+.projects-note { padding-top: 12px; }
+.project-check input { width: 16px; height: 16px; accent-color: #62e5bf; cursor: pointer; }
+.merge-destinations { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.modal-body .merge-destination { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; margin: 0; cursor: pointer; }
+.modal-body .merge-destination input { width: auto; accent-color: #62e5bf; }
+.merge-destination span { min-width: 0; overflow-wrap: anywhere; }
+.merge-destination small { color: var(--muted); }
+.merge-destination:has(input:checked) { background: #28413d; }
+.merge-preview { padding: 12px; background: #1b2930; border-radius: 8px; overflow-wrap: anywhere; }
+.merge-preview p { margin: 6px 0 0; }
+@media (max-width: 600px) { .projects-panel .panel-heading { flex-wrap: wrap; gap: 12px; } .projects-panel .search { width: 100%; } }

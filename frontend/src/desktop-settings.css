@@ -1,0 +1,59 @@
+#desktop-preferences {
+  border-top: 1px solid var(--border, #34444e);
+  margin-top: 20px;
+  padding-top: 14px;
+}
+#desktop-preferences h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+#desktop-preferences .desktop-hint {
+  margin: -6px 0 8px 26px;
+}
+#desktop-preferences .desktop-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-weight: 400;
+}
+#desktop-preferences input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: 0 0 16px;
+  accent-color: #62e5bf;
+}
+#desktop-preferences fieldset {
+  border: 1px solid #34444e;
+  border-radius: 6px;
+  margin: 14px 0;
+  padding: 5px 12px;
+}
+#desktop-preferences legend {
+  color: #a8b6c7;
+  padding: 0 5px;
+  font-size: 12px;
+}
+.desktop-error {
+  color: #e5a698;
+  font-size: 12px;
+}
+.desktop-modal {
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+}
+.desktop-modal .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+.desktop-modal > .panel-heading,
+.desktop-modal > .modal-footer {
+  flex-shrink: 0;
+}
+.widget-account-setting { display: flex; gap: 6px; align-items: center; padding: 4px 0; }
+.widget-account-setting label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; margin: 0; font-weight: 400; }
+.widget-account-setting label span { overflow-wrap: anywhere; }
+.widget-account-setting button { border: 1px solid var(--border, #34444e); background: transparent; color: var(--text, #e8f0f3); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.widget-account-setting button:disabled { opacity: .35; cursor: default; }

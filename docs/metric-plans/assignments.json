@@ -1,0 +1,38 @@
+{
+  "objective": "Implement estimated cache discount, cache reuse rate, reasoning share, and unique active chats and agents/sub-agents per day.",
+  "rootThreadId": "01a128c9-c881-78a2-b158-ec9d235ffa27",
+  "projectId": "local-deb1d9579c68b3fa31095f41e2aad375",
+  "model": "gpt-6-astra",
+  "reasoningEffort": "medium",
+  "workingDirectory": "E:/Codex/2026-05-24/codex-session-insights-c-users-andyc/desktop-app",
+  "priorBugIntegration": {
+    "threadId": "01a128d4-64aa-7310-a18d-f075337956f7",
+    "hostId": "local",
+    "status": "completed",
+    "report": "docs/bugfix-plans/status/integration.md"
+  },
+  "assignments": [
+    {
+      "role": "backend",
+      "threadId": "01a128fc-f76a-7993-8b1e-868488668240",
+      "hostId": "local",
+      "plan": "docs/metric-plans/01-backend.md",
+      "handoff": "docs/metric-plans/status/backend.json"
+    },
+    {
+      "role": "interface",
+      "threadId": "01a128fd-2a71-7981-b168-96a8d09d5376",
+      "hostId": "local",
+      "plan": "docs/metric-plans/02-interface.md",
+      "handoff": "docs/metric-plans/status/interface.json"
+    },
+    {
+      "role": "integration",
+      "threadId": "01a128fd-6ab3-7600-bda9-7ed2b3028bd8",
+      "hostId": "local",
+      "plan": "docs/metric-plans/03-integration.md",
+      "handoff": "docs/metric-plans/status/integration.md"
+    }
+  ]
+}
+

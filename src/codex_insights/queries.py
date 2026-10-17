@@ -6,27 +6,30 @@ from datetime import datetime, timedelta, timezone, date
 from zoneinfo import ZoneInfo
 
 from .codec import unpack
+from .usage_metrics import query_usage_metrics, query_daily_sessions
+from .projection import PROJECTION_VERSION
+from .summary_queries import edit_expressions, query_summary
+from .indexed_tokens import indexed_token_totals
+from .project_groups import resolve_project, public_merge
+from .date_ranges import date_window
+from .filter_options import normalize_selections
+from .grouped_coverage import coverage_groups
 
 
-def filter_clause(filters, zone):
-    today = datetime.now(zone).date()
-    selected = filters.get("range", "all")
-    start = None
-    end = today + timedelta(days=1)
-    if selected in {"today", "7", "30", "90"}:
-        start = today - timedelta(days=(1 if selected == "today" else int(selected)) - 1)
-    if selected == "custom":
-        start = date.fromisoformat(filters["start"])
-        end = date.fromisoformat(filters["end"]) + timedelta(days=1)
-        if start >= end:
-            raise ValueError("Start date must not follow end date")
+def filter_clause(filters, zone, today=None):
+    today = today or datetime.now(zone).date()
+    start, end = date_window(filters, today)
     to_utc = lambda day: datetime.combine(day, datetime.min.time(), zone).astimezone(timezone.utc).isoformat()
     clauses, params = ["r.ts < ?"], [to_utc(end)]
     if start:
         clauses.append("r.ts >= ?"); params.append(to_utc(start))
-    for field in ("project_id", "model", "source_id"):
+    for field in ("project_id", "model", "source_id", "provider"):
+        if field == "provider" and filters.get(field):
+            from .providers import adapter
+            adapter(filters[field])
         if filters.get(field):
-            clauses.append("r." + field + " = ?"); params.append(filters[field])
+            clauses.append("r.segment_id IN (SELECT segment_id FROM project_sessions WHERE project_id=?)" if field == "project_id" else "r." + field + " = ?")
+            params.append(filters[field])
     return " AND ".join(clauses), params, to_utc(end)
 
 
@@ -57,47 +60,94 @@ def streaks(days, today):
 
 def dashboard(store, filters=None):
     filters = filters or {}
-    zone_name = store.setting("timezone", "America/New_York")
-    zone = ZoneInfo(zone_name)
-    where, params, end = filter_clause(filters, zone)
-    table = 'metric_buckets' if store.setting('bucket_version') == 1 else 'records'
-    responses = 'sum(event_count)' if table == 'metric_buckets' else 'count(*)'
-    event_count = 'r.event_count' if table == 'metric_buckets' else '1'
-    # Delayed confirmations cannot retroactively count as confirmed at an earlier cutoff.
-    added = "CASE WHEN r.resolved_at < '" + end + "' THEN r.added ELSE 0 END"
-    removed = "CASE WHEN r.resolved_at < '" + end + "' THEN r.removed ELSE 0 END"
-    unknown = "CASE WHEN r.kind='edit' AND r.resolved_at >= '" + end + "' THEN " + event_count + " ELSE r.unknown END"
-    fields = "sum(r.total) total_tokens,sum(r.input) input_tokens,sum(r.cached) cached_tokens,sum(r.writes) cache_write_tokens,sum(r.output) output_tokens,sum(r.reasoning) reasoning_tokens,sum(r.cost) cost,sum(CASE WHEN r.priced=1 THEN r.total ELSE 0 END) priced_tokens,sum(r.prompts) prompts,sum(" + added + ") lines_added,sum(" + removed + ") lines_removed,sum(" + unknown + ") unknown_edits,sum(r.unsupported) unsupported_edits,sum(r.unknown_size) unknown_size_edits"
+    generated_at = datetime.now(timezone.utc)
     with store.connect() as db:
-        summary = {k: v or 0 for k, v in dict(db.execute("SELECT " + fields + " FROM " + table + " r WHERE " + where, params).fetchone()).items()}
-        summary["cost"] = round(summary["cost"], 2)
-        chats = db.execute("SELECT count(DISTINCT c.session_id) FROM canonical c JOIN " + table + " r ON r.segment_id=c.segment_id WHERE c.category='top_level' AND " + where, params).fetchone()[0]
-        summary["chats"] = chats
-        timeline = [dict(row) for row in db.execute("SELECT day,sum(total) tokens,sum(cost) cost,sum(prompts) prompts,sum(" + added + ")+sum(" + removed + ") lines FROM " + table + " r WHERE " + where + " GROUP BY day ORDER BY day", params)]
+        # Membership, aggregates and revision must come from the same snapshot;
+        # a merge completing halfway through a query cannot lose filtered usage.
+        db.execute("BEGIN")
+        settings = {r[0]: json.loads(r[1]) for r in db.execute("SELECT key,value FROM settings")}
+        if filters.get("project_id"):
+            filters = {**filters, "project_id": resolve_project(db, filters["project_id"])}
+        table = 'metric_buckets' if settings.get('bucket_version') == 1 else 'records'
+        options = {"projects": [dict(r) for r in db.execute("SELECT project_id id,name FROM project_sessions GROUP BY project_id ORDER BY name")],
+                   "models": [r[0] for r in db.execute("SELECT model FROM " + table + " WHERE model IS NOT NULL AND model<>'' GROUP BY model ORDER BY model")]}
+        filters = normalize_selections(filters, options, (r[0] for r in db.execute('SELECT id FROM sources')))
+        zone_name = settings.get("timezone", "America/New_York")
+        zone = ZoneInfo(zone_name)
+        today = generated_at.astimezone(zone).date()
+        start_day, end_day = date_window(filters, today)
+        where, params, end = filter_clause(filters, zone, today)
+        responses = 'sum(event_count)' if table == 'metric_buckets' else 'count(*)'
+        # Delayed confirmations cannot retroactively count at an earlier cutoff.
+        added, removed, _ = edit_expressions(table, end)
+        summary = query_summary(db, table, where, params, end)
+        all_where, all_params, _ = filter_clause({"range": "all"}, zone, today)
+        indexed_totals = indexed_token_totals(db, table, all_where, all_params)
+        from .providers.history_coverage import source_states
+        history_states = source_states(db, filters)
+        usage_metrics = query_usage_metrics(db, table, where, params, summary)
+        daily_sessions = query_daily_sessions(db, table, where, params) if settings.get("projection_version") == PROJECTION_VERSION else []
+        timeline = [dict(row) for row in db.execute("SELECT day,sum(total) tokens,sum(cost) cost,max(priced) cost_available,sum(prompts) prompts,sum(" + added + ")+sum(" + removed + ") lines FROM " + table + " r WHERE " + where + " GROUP BY day ORDER BY day", params)]
         for row in timeline:
             row["cost"] = round(row["cost"] or 0, 4)
-        projects = [dict(row) for row in db.execute("SELECT r.project_id,c.project_label name,count(DISTINCT CASE WHEN c.category='top_level' THEN r.session_id END) chats,sum(r.total) tokens,sum(r.cost) cost,sum(" + added + ") added,sum(" + removed + ") removed,max(r.day) last_active FROM " + table + " r JOIN canonical c ON c.segment_id=r.segment_id WHERE " + where + " GROUP BY r.project_id ORDER BY tokens DESC", params)]
+        projects = [dict(row) for row in db.execute("SELECT g.project_id,g.name,count(DISTINCT r.session_id) sessions,count(DISTINCT CASE WHEN c.trace_count>0 THEN r.session_id END) token_sessions,count(DISTINCT CASE WHEN c.category='top_level' THEN r.session_id END) chats,sum(r.total) tokens,sum(r.cost) cost,sum(" + added + ") added,sum(" + removed + ") removed,max(r.day) last_active FROM " + table + " r JOIN canonical c ON c.segment_id=r.segment_id JOIN project_sessions g ON g.segment_id=r.segment_id WHERE " + where + " GROUP BY g.project_id ORDER BY tokens DESC", params)]
+        project_coverages = coverage_groups(db, table, where, params, 'project') if projects else {}
+        for project in projects:
+            project_coverage = project_coverages[project['project_id']]
+            project["token_coverage"] = project_coverage['state']
+            project['metric_coverage'] = project_coverage['metrics']
+            project["analyzed_tokens"] = project["tokens"] if project_coverage['recorded_sessions'] else None
+            project["estimated_cost"] = project["cost"] if project["cost"] is not None else None
         models = [dict(row) for row in db.execute("SELECT model name,sum(total) tokens,sum(cost) cost FROM " + table + " r WHERE kind='usage' AND " + where + " GROUP BY model ORDER BY tokens DESC", params)]
         heatmap = [dict(row) for row in db.execute("SELECT weekday,hour,sum(prompts) count FROM " + table + " r WHERE prompts>0 AND " + where + " GROUP BY weekday,hour", params)]
         tiers = [dict(row) for row in db.execute("SELECT tier name," + responses + " responses,sum(total) tokens FROM " + table + " r WHERE kind='usage' AND " + where + " GROUP BY tier ORDER BY tokens DESC", params)]
         efforts = [dict(row) for row in db.execute("SELECT effort name," + responses + " responses FROM " + table + " r WHERE kind='usage' AND " + where + " GROUP BY effort ORDER BY responses DESC", params)]
-        agents = [dict(row) for row in db.execute("SELECT c.category name,count(DISTINCT r.session_id) sessions,sum(r.total) tokens FROM " + table + " r JOIN canonical c ON c.segment_id=r.segment_id WHERE " + where + " GROUP BY c.category", params)]
-        options = {"projects": [dict(r) for r in db.execute("SELECT project_id id,project_label name FROM canonical GROUP BY project_id ORDER BY project_label")],
-                   "models": [r[0] for r in db.execute("SELECT model FROM " + table + " WHERE kind='usage' GROUP BY model ORDER BY model")]}
+        agents = [dict(row) for row in db.execute("SELECT c.category name,count(DISTINCT r.session_id) sessions,sum(r.total) tokens FROM " + table + " r JOIN canonical c ON c.segment_id=r.segment_id WHERE r.kind!='subagent_presence' AND " + where + " GROUP BY c.category", params)]
+        embedded = db.execute("SELECT count(DISTINCT r.session_id) FROM " + table + " r WHERE r.kind='subagent_presence' AND " + where, params).fetchone()[0]
+        if embedded:
+            agents.append({'name':'embedded_subagents','sessions':embedded,'tokens':None})
         diagnostics = [json.loads(r[0] or "{}") for r in db.execute("SELECT diagnostic FROM canonical")]
+        filtered_diagnostics = [json.loads(r[0] or '{}') for r in db.execute('SELECT DISTINCT c.diagnostic FROM canonical c JOIN ' + table + ' r ON r.segment_id=c.segment_id WHERE ' + where, params)]
+        from .providers.schema import coverage
+        token_coverage = coverage(db, table, where, params)
+        sources = [dict(r) for r in db.execute("SELECT s.*, (SELECT count(*) FROM candidates c WHERE c.source_id=s.id) AS segments, (SELECT max(last_active) FROM canonical c WHERE c.source_id=s.id) AS last_activity FROM sources s ORDER BY kind,label")]
+        source_diagnostics = {r[0]: json.loads(r[1]) for r in db.execute('SELECT source_id,payload FROM source_diagnostics')}
+    from .providers import adapter
+    for source in sources:
+        if source['id'] in source_diagnostics:
+            source['legacy_diagnostics'] = source_diagnostics[source['id']]
+        source["capabilities"] = adapter(source.get("provider", "codex")).capabilities if source.get("provider") != "mixed" else {}
+    reasoning_state = token_coverage['metrics']['reasoning']['state']
+    if reasoning_state != 'complete' or token_coverage['metrics']['output']['state'] != 'complete':
+        usage_metrics["reasoning_share_percent"] = None
+    if token_coverage['metrics']['input']['state'] != 'complete' or token_coverage['metrics']['cached']['state'] != 'complete':
+        usage_metrics['cache_reuse_percent'] = None
+    if token_coverage['metrics']['cached']['state'] == 'unavailable':
+        usage_metrics['cache_discount_usd'] = None
+        usage_metrics['cache_discount_coverage_percent'] = None
+    token_coverage["reasoning"] = 'recorded' if reasoning_state == 'complete' else reasoning_state
+    summary["token_coverage"] = token_coverage["state"]
+    summary['metric_coverage'] = token_coverage['metrics']
+    completion_time_missing = summary['edit_completion_time_unavailable']
+    summary["estimated_cost"] = summary["cost"] if summary["priced_tokens"] or (token_coverage["recorded_sessions"] and not summary["total_tokens"]) else None
+    summary["analyzed_tokens"] = summary["total_tokens"] if token_coverage["recorded_sessions"] else None
     active = [row["day"] for row in timeline if row["prompts"]]
-    summary.update(active_days=len(active), **streaks(active, datetime.now(zone).date()))
-    summary["priced_percent"] = round(summary["priced_tokens"] / summary["total_tokens"] * 100, 1) if summary["total_tokens"] else 0
-    summary["change_coverage"] = "partial" if summary["unknown_edits"] or summary["unsupported_edits"] or summary["unknown_size_edits"] else "observed" if summary["lines_added"] or summary["lines_removed"] else "no_observed_changes"
+    summary.update(active_days=len(active), **streaks(active, today))
     milestone = max(1_000_000_000, (summary["total_tokens"] // 1_000_000_000 + 1) * 1_000_000_000)
-    highlights = {"busiest": max(timeline, key=lambda x:x["tokens"], default=None), "expensive": max(timeline, key=lambda x:x["cost"], default=None), "milestone": milestone}
-    return {"summary": summary, "timeline": timeline, "projects": projects, "models": models, "heatmap": heatmap,
+    highlights = {"busiest": max(timeline, key=lambda x:x["tokens"], default=None), "expensive": max((r for r in timeline if r['cost_available']), key=lambda x:x["cost"], default=None), "milestone": milestone}
+    return {"indexed_token_totals": indexed_totals, "usage_metrics": usage_metrics, "daily_sessions": daily_sessions, "summary": summary, "timeline": timeline, "projects": projects, "models": models, "heatmap": heatmap,
             "tiers": tiers, "efforts": efforts, "agents": agents, "highlights": highlights,
             "equivalents": equivalents(summary["total_tokens"], summary["output_tokens"]), "options": options,
-            "sources": store.sources(), "filters": {"range":"all","project_id":"","model":"","source_id":"","start":"","end":"",**filters}, "timezone": zone_name, "revision": store.setting("data_revision", 0),
-            "generated_at": datetime.now(timezone.utc).isoformat(), "demo": store.setting("demo", False),
-            "coverage": {"conflicts": sum(bool(x.get("conflicts")) for x in diagnostics),
+            "sources": sources, 'source_states': history_states, "filters": {"range":"all","project_id":"","model":"","source_id":"","provider":"","start":"","end":"",**filters}, "timezone": zone_name, "revision": settings.get("data_revision", 0),
+            "date_bounds": {"start": start_day.isoformat() if start_day else timeline[0]["day"] if timeline else None,
+                            "end": (end_day - timedelta(days=1)).isoformat()},
+            "generated_at": generated_at.isoformat(), "demo": settings.get("demo", False),
+            "coverage": {"tokens": token_coverage, "conflicts": sum(bool(x.get("conflicts") or x.get('accounting_overlap')) for x in diagnostics),
+                         'edit_completion_time_unavailable': completion_time_missing,
+                         'provenance': [d['provenance'] for d in filtered_diagnostics if d.get('provenance')],
                          "parse_errors": sum(x.get("parse_errors", 0) for x in diagnostics),
                          "replay_tokens": sum(x.get("replay_tokens", 0) for x in diagnostics),
                          "unresolved": sum(x.get("accounting") in {"parent_missing", "no_parent_alignment", "raw_trace_unavailable"} for x in diagnostics)},
-            "settings": {"assumed_fast_percent": store.setting("assumed_fast_percent", 0), "device_label": store.setting("device_label", "This computer")}}
+            "project_merge": public_merge(settings.get("last_project_merge")),
+            "project_migration_pending": settings.get("project_groups_version") != 1,
+            "settings": {"assumed_fast_percent": settings.get("assumed_fast_percent", 0), "device_label": settings.get("device_label", "This computer"), "live_usage_enabled": settings.get("live_usage_enabled", True)}}

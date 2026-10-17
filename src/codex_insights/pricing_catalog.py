@@ -7,7 +7,8 @@ from .accounting import pricing
 
 
 def catalog():
-    return {"version": 1, "verified_at": "2026-10-08", "source": "https://developers.openai.com/api/docs/pricing",
+    from .providers.pricing import catalog as provider_catalog
+    return {"provider_models": provider_catalog(), "version": 1, "verified_at": "2026-10-08", "source": "https://developers.openai.com/api/docs/pricing",
             "models": json.loads(json.dumps(pricing.MODEL_RATE_RECORDS, default=lambda x:x.isoformat()))}
 
 

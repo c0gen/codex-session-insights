@@ -1,0 +1,53 @@
+.allowance-strip { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 12px 18px; margin-bottom: 16px; min-width: 0; }
+.allowance-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+.allowance-heading > span:first-child { font-weight: 600; color: var(--text); }
+.allowance-bucket-name, .allowance-bucket-label { margin-left: auto; }
+.allowance-bucket-label { display: inline-flex; align-items: center; gap: 6px; }
+.allowance-bucket { max-width: 220px; margin-left: auto; padding: 4px 8px; font: inherit; }
+.allowance-bucket-label .allowance-bucket { margin-left: 0; }
+.allowance-refresh { padding: 3px 6px; border: 0; background: transparent; color: #62e5bf; font: inherit; cursor: pointer; }
+.allowance-refresh:disabled { cursor: default; color: var(--muted); }
+.allowance-windows { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 8px 0; }
+.allowance-window { flex: 1 1 200px; min-width: 0; }
+.allowance-window-label { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.allowance-window-label strong { color: #62e5bf; white-space: nowrap; }
+.allowance-track { height: 4px; border-radius: 4px; background: #2a3b43; overflow: hidden; margin: 5px 0; }
+.allowance-track span { display: block; height: 100%; background: #62e5bf; }
+.allowance-window small, .allowance-update { font-size: 11px; color: var(--muted); }
+.allowance-stale { font-size: 10px; font-weight: 500; color: #e5a698; }
+.allowance-error, .allowance-unavailable { margin: 4px 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.allowance-error { color: #e5a698; }
+.burn-rate { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 8px 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.burn-rate strong { color: var(--text); font-weight: 600; }
+.local-burn-rates { display: flex; flex-wrap: wrap; column-gap: 24px; margin: 8px 0; }
+.local-burn-rates .burn-rate { margin: 3px 0; min-width: 0; }
+.burn-rate-period { font-size: 11px; color: var(--muted); }
+.burn-rate:focus-visible { outline: 2px solid #62e5bf; outline-offset: 3px; border-radius: 3px; }
+.allowance-window .burn-rate { margin: 5px 0 0; font-size: 11px; }
+.burn-rate[data-status="stale"] strong { color: #e5a698; }
+.provider-allowances .provider-allowance { flex: 1 1 320px; min-width: 0; margin-bottom: 0; }
+.provider-limit { --allowance-color: #62e5bf; }
+.provider-limit[data-tone="low"] { --allowance-color: #efc36b; }
+.provider-limit[data-tone="critical"] { --allowance-color: #ff8b86; }
+.provider-limit[data-tone="unknown"], .provider-limit[data-state] { --allowance-color: #a8b6c7; }
+.provider-limit .allowance-window-label strong { color: var(--allowance-color); }
+.provider-limit .allowance-track span { background: var(--allowance-color); }
+.provider-limit small { display: block; overflow-wrap: anywhere; }
+.fine-print code { font-size: 0.95em; }
+/* Overview limits row: one line of provider chips, full cards live on Accounts. */
+.limits-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0 2px; }
+.limit-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.limit-chip { --allowance-color: #62e5bf; display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.limit-chip:hover { border-color: #68817f; }
+.limit-chip[data-tone="low"] { --allowance-color: #efc36b; }
+.limit-chip[data-tone="critical"] { --allowance-color: #ff8b86; }
+.limit-chip[data-tone="unknown"] { --allowance-color: #a8b6c7; }
+.limit-chip-name { color: #e9edf6; font-weight: 600; }
+.limit-chip strong { color: var(--allowance-color); font-weight: 600; }
+.limit-chip-track { width: 38px; height: 4px; border-radius: 4px; background: #2a3b43; overflow: hidden; }
+.limit-chip-track span { display: block; height: 100%; background: var(--allowance-color); }
+.limit-burn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.limit-burn .burn-rate { margin: 0; }
+.limit-details { margin-left: auto; font-size: 12px; padding: 4px 0; }
+@media (max-width: 600px) { .limit-chip { flex-wrap: wrap; white-space: normal; border-radius: 12px; } .limit-details { margin-left: 0; } }
+@media (max-width: 600px) { .allowance-strip { padding: 12px; } .allowance-window { flex-basis: 100%; } .allowance-update { line-height: 1.5; } }

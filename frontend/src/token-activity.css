@@ -1,0 +1,73 @@
+.token-activity {
+  --token-zero: #30363e;
+  --token-blue-1: #203c67;
+  --token-blue-2: #2e5998;
+  --token-blue-3: #4986ee;
+  --token-blue-4: #89baff;
+  min-width: 0;
+  margin-bottom: 14px;
+}
+.token-activity .panel-heading { align-items: center; flex-wrap: wrap; }
+/* Same segmented look as the other dashboard toggles (.segmented in style.css). */
+.token-mode-controls { display: flex; border: 1px solid #364550; border-radius: 5px; overflow: hidden; flex-shrink: 0; }
+.token-mode-controls button {
+  padding: 9px 15px;
+  border: 0;
+  border-right: 1px solid #34424b;
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.token-mode-controls button:last-child { border-right: 0; }
+.token-mode-controls button:hover { background: #283840; }
+.token-mode-controls button[aria-pressed="true"] { color: #e6fff6; background: linear-gradient(#1e493f, #203d39); box-shadow: inset 0 0 0 1px var(--mint); border-radius: 4px; }
+.token-activity button:focus-visible { outline-color: var(--token-blue-4); }
+.token-calendars { padding: 0 19px; }
+.token-year + .token-year { margin-top: 18px; }
+.token-year h3 { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.token-calendar-scroll { --token-cell: 18px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+.token-calendar { display: grid; grid-template-columns: 30px max-content; gap: 10px; padding: 3px; width: max-content; }
+.token-weekdays { display: grid; grid-template-rows: repeat(7, var(--token-cell)); gap: 4px; position: sticky; left: 0; z-index: 1; background: var(--panel); box-shadow: 8px 0 var(--panel); }
+.token-weekdays span { align-self: center; color: var(--muted); font-size: 10px; }
+.token-calendar-cells {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, var(--token-cell));
+  grid-template-columns: repeat(var(--weeks), var(--token-cell));
+  gap: 4px;
+}
+.token-day { border: 0; padding: 0; border-radius: 4px; width: var(--token-cell); height: var(--token-cell); outline-offset: 1px; scroll-margin-inline: 44px 8px; }
+.token-day:hover { box-shadow: inset 0 0 0 1px #dce9ff; }
+.token-activity [data-level="0"] { background: var(--token-zero); }
+.token-activity [data-level="1"] { background: var(--token-blue-1); }
+.token-activity [data-level="2"] { background: var(--token-blue-2); }
+.token-activity [data-level="3"] { background: var(--token-blue-3); }
+.token-activity [data-level="4"] { background: var(--token-blue-4); }
+.token-calendar-months { display: grid; grid-template-columns: repeat(var(--weeks), var(--token-cell)); gap: 4px; margin-top: 9px; min-height: 18px; color: var(--muted); font-size: 12px; }
+.token-calendar-months span { white-space: nowrap; }
+.token-activity-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 19px 16px; color: var(--muted); font-size: 12px; }
+.token-activity-footer strong { color: #d3deeb; font-weight: 600; }
+.token-legend { display: inline-flex; align-items: center; gap: 4px; }
+.token-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.token-legend i:first-of-type { margin-left: 4px; }
+.token-legend i:last-of-type { margin-right: 4px; }
+.token-chart { height: 240px; margin: 0 19px; }
+.token-empty { padding: 12px 19px; font-size: 13px; }
+.token-tooltip {
+  position: fixed;
+  z-index: 1200;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 11px 15px;
+  border: 1px solid #425164;
+  border-radius: 10px;
+  background: #28323e;
+  box-shadow: 0 5px 18px #0005;
+  pointer-events: none;
+}
+.token-tooltip span, .token-tooltip strong { display: block; }
+.token-tooltip span { color: #c4cedc; font-size: 12px; }
+.token-tooltip strong { margin-top: 3px; font-size: 17px; font-weight: 550; }
+@media (max-width: 600px) {
+  .token-activity .panel-heading { gap: 10px; }
+  .token-mode-controls button { padding: 7px 10px; }
+}

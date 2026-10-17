@@ -1,4 +1,6 @@
 const paths: Record<string, string> = {
+  pin: '<path d="m9 3 6 0-1 6 4 4H6l4-4zM12 13v8"/>',
+  expand: '<path d="M14 3h7v7M21 3l-9 9M10 3H3v18h18v-7"/>',
   terminal: '<path d="m5 6 5 6-5 6m8 0h6"/>',
   home: '<path d="m3 10 9-7 9 7v11h-6v-7H9v7H3z"/>',
   chart: '<path d="M3 21h18M6 18V9m6 9V3m6 15v-6"/>',
@@ -6,6 +8,7 @@ const paths: Record<string, string> = {
   database:
     '<ellipse cx="12" cy="5" rx="9" ry="4"/><path d="M3 5v14c0 5 18 5 18 0V5M3 12c0 5 18 5 18 0"/>',
   refresh: '<path d="M20 7v5h-5M20 12a8 8 0 1 0-2 6"/>',
+  copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
   file: '<path d="M5 2h9l5 5v15H5zM14 2v6h5M8 12h8m-8 4h8"/>',
   book: '<path d="M12 4v18M12 4C8 1 2 3 2 3v17s6-2 10 2c4-4 10-2 10-2V3s-6-2-10 1"/>',
   ruler: '<path d="m2 17 15-15 5 5L7 22zM6 13l2 2m2-6 2 2m2-6 2 2"/>',
@@ -18,6 +21,7 @@ const paths: Record<string, string> = {
   flame:
     '<path d="M12 2c3 7-2 6 0 11 3-2 4-4 4-6 8 9 6 16-4 16S1 15 6 10c0 5 4 6 3 0 0-3 1-6 3-8z"/>',
   laptop: '<path d="M5 3h14v14H5zM2 21h20l-3-4H5z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
   shield: '<path d="m12 2 9 4v6c0 6-9 10-9 10S3 18 3 12V6zM12 7v6m0 4h.01"/>',
   settings:
     '<path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/><circle cx="12" cy="12" r="6"/>',

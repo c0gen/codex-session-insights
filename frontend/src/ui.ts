@@ -16,8 +16,8 @@ export const dateLabel = (value: string) =>
         day: "numeric",
       })
     : "—";
-export const tip = (text: string) =>
-  `<span class="info" tabindex="0" title="${esc(text)}" aria-label="${esc(text)}">${icon("info", 16)}</span>`;
+export const tip = (text: string, id?: string) =>
+  `<span ${id ? `id="${esc(id)}" ` : ""}class="info" tabindex="0" title="${esc(text)}" aria-label="${esc(text)}">${icon("info", 16)}</span>`;
 export const button = (
   id: string,
   label: string,

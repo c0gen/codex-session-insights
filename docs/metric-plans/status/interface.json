@@ -1,0 +1,67 @@
+{
+  "owner": "interface",
+  "status": "complete",
+  "summary": "Implemented all three cache/reasoning cards and a paged daily active-session chart with exact accessible counts in Usage & Cost and offline HTML reports.",
+  "changed_files": [
+    "frontend/src/types.ts",
+    "frontend/src/main.ts",
+    "frontend/src/views/usage.ts",
+    "frontend/src/usage-metrics.ts",
+    "frontend/src/usage-metrics.css",
+    "frontend/src/daily-sessions-data.ts",
+    "frontend/src/daily-sessions-chart.ts",
+    "frontend/src/daily-sessions.ts",
+    "scripts/metric-interface-fixture.mjs",
+    "scripts/qa_metric_interface_data.mjs",
+    "scripts/qa_metric_interface.mjs",
+    "docs/metric-plans/status/interface.json"
+  ],
+  "checks": [
+    {
+      "command": "npm --prefix frontend run typecheck",
+      "result": "PASS: TypeScript noEmit."
+    },
+    {
+      "command": "node scripts/qa_metric_interface_data.mjs",
+      "result": "PASS: immutable synthetic snapshots; missing API fields; real zero and null ratios; partial/absent cache pricing; tiny and signed amounts; sparse zero-filled dates; leap day and both DST boundaries; bounded 90-day materialization for a 3,652,059-day range."
+    },
+    {
+      "command": "npm --prefix frontend run build",
+      "result": "PASS: TypeScript and both production Vite builds, including widget. Sandbox realpath EPERM required an elevated retry; final rebuilt assets passed."
+    },
+    {
+      "command": "$env:PLAYWRIGHT_CHANNEL='msedge'; node scripts/qa_metric_interface.mjs .local-data/metric-interface-20261010-frontend",
+      "result": "PASS, exit 0: real built frontend against isolated synthetic API fixture; metric states; exact table and three series; keyboard expansion/paging/date navigation; gap dates; display timezone independent of browser timezone; custom draft/applied filter separation; project/model/source query propagation; revision refresh; eight navigation cycles; 390px layout with no document overflow; unavailable and empty snapshots; real Python report exporter with synthetic JSON; saved HTML navigation and exact values with zero network requests and zero page errors. Used installed Edge because Playwright Chromium was not installed; browser launch required elevation."
+    },
+    {
+      "command": "node scripts/qa_filter_state_unit.mjs",
+      "result": "PASS: restore validation, drafts, failures, exports, races, background refresh and merged IDs."
+    },
+    {
+      "command": "node scripts/qa_token_activity_data.mjs",
+      "result": "PASS: existing calendar/token activity and shared image date regressions."
+    },
+    {
+      "command": "git diff --check -- frontend/src/types.ts frontend/src/main.ts frontend/src/views/usage.ts",
+      "result": "PASS: exit 0; Git emitted only the existing main.ts line-ending normalization warning."
+    }
+  ],
+  "artifacts": [
+    ".local-data/metric-interface-20261010-frontend/metrics.png",
+    ".local-data/metric-interface-20261010-frontend/daily-counts.png",
+    ".local-data/metric-interface-20261010-frontend/narrow.png",
+    ".local-data/metric-interface-20261010-frontend/offline.png",
+    ".local-data/metric-interface-20261010-frontend/fixture.json",
+    ".local-data/metric-interface-20261010-frontend/report.html"
+  ],
+  "integration_notes": [
+    "Consumes the exact shared optional usage_metrics and daily_sessions contract. Browser does not calculate pricing or infer session presence from token totals. Missing old fields show unavailable, not fabricated zero.",
+    "Daily chart pages through at most 90 calendar days, initially showing the final page. Previous/next and a date input expose all dates; each page has a keyboard-expandable exact table. Zero-filled days come from applied response date_bounds via existing calendar helpers.",
+    "DailySessionsPanel owns chart destruction and AbortController listener cleanup. Main render unmounts it alongside existing chart cleanup; existing filter-state controller remains unchanged.",
+    "Negative cache differences retain their sign and explicitly say estimated surcharge. Partial estimates say priced subtotal and show exact cached-token coverage. Tooltips expose unrounded USD and percentage values.",
+    "Standalone report verification used the existing Python export_html implementation without editing Python. No backend service, live index, original logs or credentials were accessed.",
+    "Integration owner must validate backend pricing formulas, deduplication/category semantics, date/tier rates, migrations, applied-filter queries and final combined regressions after backend completes. This owner's API integration checks use synthetic contract fixtures.",
+    "No existing broad QA scripts or app documentation were edited. Significant pre-existing working-tree changes were preserved; no commit, reset, stash, publication or release was performed.",
+    "notify_andy tools were unavailable in this chat's tool inventory, so no optional Telegram completion notification could be sent."
+  ]
+}

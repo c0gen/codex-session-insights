@@ -1,0 +1,57 @@
+{
+  "owner": "account-identity",
+  "bugs": ["B3"],
+  "outcome": "Scoped implementation and new regressions complete; legacy fixture and shared type updates handed to integration.",
+  "contract": {
+    "identity": "AccountIdentity carries a private hashed lifecycle marker and a separate confirmed accountId hash. Only explicit confirmed identity can deduplicate. Email, nullable metadata, and legacy opaque lifecycle strings never prove identity.",
+    "aggregate": "Confirmed accounts use their freshest available lifetime counter once. Unresolved connections retain their own counters. total_tokens is a possibly duplicated connection sum when identity_complete=false; unresolved_connections explicitly counts enabled, non-removing connections without proof. accounts/reported_accounts then count aggregate groups, not proven distinct accounts.",
+    "headline": "Unresolved sums show an unverified badge, unresolved connection count, and may include duplicates. Missing counters remain partial; unresolved groups are not described as distinct-account coverage.",
+    "history": "History is retrieved before an independent allowance identity probe. Probe failure or absent/blank accountId clears prior proof before new history is accepted. This preserves successful history even if allowance times out and wedges its RPC process. Lifecycle changes invalidate both caches; plan-only changes do not.",
+    "privacy": "Raw identifiers remain provider-local. Neither lifecycle hashes nor confirmed identity hashes are exposed by account snapshots or persisted to analytics. Existing Accounts.read already captures the private identity with history under the cache lock."
+  },
+  "changed_files": [
+    "src/codex_insights/account_identity.py",
+    "src/codex_insights/codex_account.py",
+    "src/codex_insights/account_totals.py",
+    "frontend/src/token-kpi.ts",
+    "tests/test_account_identity_certainty.py",
+    "scripts/qa_account_identity.mjs",
+    "docs/bugfix-plans/status/accounts.json"
+  ],
+  "tests": [
+    {
+      "command": "python -m pytest tests/test_account_identity_certainty.py -q -p no:cacheprovider (before implementation)",
+      "result": "All five initial regressions failed, reproducing false anonymous merging, missing certainty metadata, workspace merging, and stale identity attachment."
+    },
+    {
+      "command": "python -m pytest tests/test_account_identity_certainty.py tests/test_accounts.py tests/test_usage_limits.py tests/test_burn_rate_accounts.py tests/test_burn_rates.py tests/test_local_token_burn.py -q -p no:cacheprovider --basetemp=.local-data/b3-identity-20261010-c",
+      "result": "89 passed. Includes fake RPC error and timeout independence, identity resolution transitions, same-email workspaces, blank IDs, cache invalidation, zero/missing/freshness, enable/remove exclusion, privacy, and burn-rate compatibility."
+    },
+    {
+      "command": "npm run typecheck (frontend)",
+      "result": "Passed."
+    },
+    {
+      "command": "node scripts/qa_account_identity.mjs",
+      "result": "Passed all unresolved, partial, confirmed, zero, unavailable and demo headline render assertions."
+    },
+    {
+      "command": "python -m pytest tests/test_account_totals.py -q -p no:cacheprovider --basetemp=.local-data/b3-identity-20261010-d",
+      "result": "2 passed, 2 legacy fixture failures requiring integration updates described below."
+    }
+  ],
+  "required_integration_work": [
+    "Update tests/test_account_totals.py fixture helper so a supplied confirmed identity is AccountIdentity(lifecycle=identity, confirmed=identity); None remains unresolved. Extend the exact expected result with identity_complete=false and unresolved_connections=3. These two fixtures intentionally encode the old contract and were outside the assigned new-test file ownership.",
+    "After the active burn-rate chat finishes owning frontend/src/account-types.ts, add identity_complete:boolean and unresolved_connections:number to AccountTokenTotal (optional only if needed for historical static fixtures). token-kpi.ts currently uses structural property guards and already passes type checking without touching that shared file.",
+    "Run combined validation after all owners finish; include node scripts/qa_account_identity.mjs. Existing browser token-KPI fixtures omit identity coverage and continue to render with legacy fallback; add explicit confirmed metadata to those fixtures when updating shared tests."
+  ],
+  "unresolved_issues": [
+    "Account identity cannot be proven when the server provides no stable ID. Such counters remain useful but explicitly unverified; no email-based inference is attempted.",
+    "Each history refresh adds a rateLimits identity probe and can wait for that probe timeout before publishing its successful history. A transient probe failure conservatively invalidates prior identity-bound caches, then publishes history without proof."
+  ],
+  "notes": [
+    "No original logs, actual credentials, shared account-monitor/type files, releases, commits, or external messages were modified or sent.",
+    "Optional notify_andy tools were not available in the tool catalog.",
+    "An initial Vite SSR test hit a Windows realpath permission error. Rendering checks were subsequently run successfully with an in-memory esbuild bundle in the permanent regression script."
+  ]
+}

@@ -9,6 +9,8 @@ import hashlib
 import json
 import re
 
+from .structured_changes import StructuredChanges
+
 
 CONTRACT_VERSION = "2.0"
 COUNT_FIELDS = (
@@ -202,16 +204,21 @@ class ChangeTracker:
         self.pending = {}
         self.cells = {}
         self.waits = {}
+        self.structured = StructuredChanges()
 
     def observe(self, payload, timestamp):
         kind = payload.get("type", "")
         call_id = payload.get("call_id")
+        if kind == "item_completed" and isinstance(payload.get("item"), dict) and payload["item"].get("type") == "FileChange":
+            self.structured.observe(payload["item"], timestamp, self.events)
+            return
         if kind in {"function_call", "custom_tool_call"}:
             name = tool_name(payload.get("name"))
             arg = arguments(payload)
             if name == "wait" and isinstance(arg, dict):
                 self.waits[call_id] = str(arg.get("cell_id", ""))
                 return
+            self.structured.start_call(call_id, name)
             patches = []
             if name == "apply_patch":
                 patches = [arg if isinstance(arg, str) else next((arg[k] for k in ("patch", "input") if isinstance(arg, dict) and isinstance(arg.get(k), str)), None)]
@@ -239,16 +246,18 @@ class ChangeTracker:
                          "digest": hashlib.sha256((patch if patch is not None else raw).encode("utf-8", errors="surrogatepass")).hexdigest(),
                          "outcome": "unknown", "direct": name == "apply_patch"}
                 indices.append(len(self.events))
+                self.structured.register(call_id, len(self.events), patch)
                 self.events.append(event)
             if indices:
                 self.pending[call_id] = indices
         elif kind in {"function_call_output", "custom_tool_call_output"}:
+            text = output_text(payload.get("output"))
+            self.structured.finish_call(call_id, text, self.waits.get(call_id))
             indices = self.pending.get(call_id)
             if call_id in self.waits:
                 indices = self.cells.get(self.waits[call_id])
             if not indices:
                 return
-            text = output_text(payload.get("output"))
             cell = re.search(r"Script running with cell ID\s+([^\s]+)", text)
             if cell:
                 self.cells[cell[1]] = indices
@@ -256,8 +265,8 @@ class ChangeTracker:
             success_blocks = re.findall(r"Success\. Updated the following files:\s*\n((?:[AMD] [^\n]+\n?)+)", text)
             successful_files = [normalized_files(re.findall(r"^[AMD] (.+)$", block, re.M)) for block in success_blocks]
             failure = bool(re.search(r"apply_patch.*(?:failed|error)|(?:Failed to find expected lines|Invalid patch|patch rejected|User rejected)", text, re.I))
-            for event in events:
-                if not event["supported"]:
+            for index, event in zip(indices, events):
+                if not event["supported"] or self.structured.owns(index):
                     continue
                 # Multiple calls touching identical files cannot be distinguished
                 # from unlabelled nested output; keep them unknown.

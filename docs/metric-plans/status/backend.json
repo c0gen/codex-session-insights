@@ -1,0 +1,83 @@
+{
+  "owner": "backend",
+  "status": "complete",
+  "ready_for_integration": true,
+  "summary": "Implemented usage_metrics and daily_sessions using effective reconciled-response pricing and compact indexed day/model presence in the existing dashboard read snapshot.",
+  "changed_files": [
+    "src/codex_insights/accounting/pricing.py",
+    "src/codex_insights/buckets.py",
+    "src/codex_insights/projection.py",
+    "src/codex_insights/queries.py",
+    "src/codex_insights/storage.py",
+    "src/codex_insights/session_presence.py",
+    "src/codex_insights/usage_metrics.py",
+    "tests/test_usage_metrics.py",
+    "tests/test_daily_sessions.py",
+    "docs/metric-plans/status/backend.json"
+  ],
+  "implementation": {
+    "usage_metrics": "Exact six shared API fields; ratios use aggregate original counters, null for zero/invalid denominators; cached-token coverage distinguishes no-cache, unknown and partial pricing; signed discount is summed without response rounding.",
+    "pricing": "estimate_token_cost now returns cache_discount_usd calculated from its already-selected effective rates. Existing date/tier/context/assumed-Fast selection and cache-write charges are reused unchanged.",
+    "daily_sessions": "Chronological sparse day/chats/subagents/system_agents rows. COUNT DISTINCT session IDs by canonical category over compact presence records. Pre-creation activity is excluded using earliest canonical segment creation per session. Day/model presence includes activity with no usage. Original one-activity-row-per-day compact contract is retained.",
+    "filters_snapshot": "Uses the existing date, project membership/alias, model and canonical source clauses, timezone and same SQLite read transaction/revision as dashboard aggregates.",
+    "performance": "Dashboard queries only indexed records/buckets, never raw facts. Presence creation/model recovery happens during projection. Additive cache discount and priced cached-token counters are stored on both raw records and buckets."
+  },
+  "migration": {
+    "projection_version": 2,
+    "columns": {
+      "cache_discount": "nullable REAL",
+      "cache_priced": "nullable INTEGER"
+    },
+    "startup": "Store performs only lightweight nullable column additions. Existing deferred GUI projection maintenance is retained; startup can read cached rows without missing-column errors. Cached tokens lacking migrated facts show null discount and zero pricing coverage, never fully priced zero. daily_sessions is empty until projection version 2 commits.",
+    "upgrade": "Normal ensure_projection atomically rebuilds records and buckets from canonical/candidate facts, including offline and imported facts; version and revision advance only on successful commit. Existing rollback, projection queue and deferred startup behavior remain intact.",
+    "bucket_compatibility": "Explicit INSERT column lists handle both fresh table column order and old tables with appended migration columns."
+  },
+  "checks": [
+    {
+      "command": "python -m pytest tests/test_usage_metrics.py tests/test_daily_sessions.py tests/test_engine.py tests/test_projection_upgrade.py -q --basetemp .local-data/metrics-backend-focused2",
+      "result": "37 passed"
+    },
+    {
+      "command": "python -m pytest -q --basetemp .local-data/metrics-backend-full",
+      "result": "281 passed, 1 environment failure: child subprocess in Windows single-instance test could not import local package without PYTHONPATH. Corrected in next full run."
+    },
+    {
+      "command": "$env:PYTHONPATH = (Join-Path (Get-Location) 'src'); python -m pytest -q --basetemp .local-data/metrics-backend-verified",
+      "result": "287 passed in 56.88s"
+    },
+    {
+      "command": "python -m pytest tests/test_usage_metrics.py tests/test_daily_sessions.py -q --basetemp .local-data/metrics-backend-replay-final",
+      "result": "26 passed in 7.45s; includes one additional replay/copy-discount regression added after the full suite was collected"
+    },
+    {
+      "command": "git diff --check -- src/codex_insights/accounting/pricing.py src/codex_insights/buckets.py src/codex_insights/projection.py src/codex_insights/queries.py src/codex_insights/storage.py",
+      "result": "Passed; Git emitted only existing Windows line-ending normalization notices"
+    }
+  ],
+  "coverage": [
+    "Exact synthetic 60 percent reuse / 25 percent reasoning / 1.08 USD discount fixture",
+    "Weighted aggregate ratios, invalid subsets preserved, zero denominators, real zero numerators",
+    "Unknown/partial/no-cache pricing, signed custom difference, tiny unrounded amounts",
+    "Historical price changes, release boundary, standard/Flex/Priority, assumed-Fast blends and context fallback, request threshold, writes counterfactual",
+    "Reconciled child replay and copied-source discount deduplication",
+    "Raw-record and bucket path parity",
+    "Actual old-schema column migration, cached reads, rollback/retry, idempotence, offline original logs and unchanged imported snapshot recovery",
+    "Repeated activity, multiple session segments, exact copied sources, nested spawned agents, system agents, forks and inherited pre-creation activity",
+    "Midnight activity, sparse inactive days, both spring/fall DST, display timezone rebuild",
+    "Model/project/date/source filters, project merge aliases, source disable/forget and imported daily count parity",
+    "Concurrent write snapshot consistency and standalone report public-field preservation",
+    "Full existing accounting/engine/projection/source/replay/local-token-burn/widget/account regression suite"
+  ],
+  "integration_notes": [
+    "Run commands from desktop-app. Set PYTHONPATH to its src directory for full-suite child subprocess imports.",
+    "The final working tree contains 288 tests: 287 passed in the full run plus the additional replay/copy test passed with all 26 focused metric tests.",
+    "Frontend should use exact usage_metrics/daily_sessions names from the shared plan and fill missing days with inclusive date_bounds. Daily counts are presence counts, not newly created chats and not additive all-range totals.",
+    "Existing GUI maintenance shows cached summary while migration runs. daily_sessions=[] until version 2; discount coverage remains conservative on unmigrated cached tokens.",
+    "Source filtering intentionally follows the selected canonical winner, as existing analytics do; exact copied physical sources do not create duplicate counts.",
+    "Synthetic dedicated tests cover both agent categories; longstanding demo totals were not changed. Portable/demo model recovery uses logged per-event model fields when contexts are absent.",
+    "Public report serialization already preserves the new fields; dedicated backend test verified it. Full production frontend builds and browser/offline acceptance remain with interface/integration owners.",
+    "No frontend/shared documentation edits, commits, releases, original log changes, live user data changes, additional chats or messages to other chats were made."
+  ],
+  "blockers": [],
+  "notification": "notify_andy tools were not available in this chat; no completion alert could be sent."
+}

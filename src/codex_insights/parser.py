@@ -6,11 +6,43 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit, urlunsplit
 
 from .accounting.change_accounting import ChangeTracker
+from .accounting.structured_changes import StructuredChanges
 from .accounting.pricing import normalize_service_tier
 from .accounting.token_accounting import normalize_usage
 from .codec import digest, timestamp
 
-PARSER_VERSION = 1
+# Reparse physical files once, including older duplicate copies whose fuller
+# history may have been overwritten in the source candidate. Offline sources
+# keep their accepted facts and are upgraded when they become available.
+PARSER_VERSION = 3
+
+
+def optional_mapping(value, field):
+    """Absent optional objects are valid; present non-objects are file errors."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("Invalid object shape: " + field)
+    return value
+
+
+def optional_text(value, field):
+    if value is not None and not isinstance(value, str):
+        raise ValueError("Invalid text shape: " + field)
+    return value
+
+
+def spawn_metadata(source):
+    if source is None or isinstance(source, str):
+        return {}
+    source = optional_mapping(source, "source")
+    subagent = source.get("subagent")
+    # Unit enum variants (e.g. review) are strings; thread_spawn carries data.
+    if isinstance(subagent, str):
+        return {}
+    spawn = optional_mapping(optional_mapping(subagent, "subagent").get("thread_spawn"), "thread_spawn")
+    optional_text(spawn.get("parent_thread_id"), "parent_thread_id")
+    return spawn
 
 
 def repository(value):
@@ -31,7 +63,7 @@ def repository(value):
 
 
 def project_identity(meta):
-    git = meta.get("git") or {}
+    git = optional_mapping(meta.get("git"), "git")
     remote = repository(git.get("repository_url") or git.get("remote_url") or git.get("remote"))
     cwd = str(meta.get("cwd") or "").replace("\\", "/").rstrip("/")
     label = remote.rsplit("/", 1)[-1] if remote else PurePosixPath(cwd).name or "Unassigned"
@@ -39,8 +71,8 @@ def project_identity(meta):
 
 
 def source_kind(source):
-    if isinstance(source, dict) and isinstance(source.get("subagent"), dict):
-        return "spawned_subagent" if source["subagent"].get("thread_spawn") else "system_subagent"
+    if isinstance(source, dict) and source.get("subagent") is not None:
+        return "spawned_subagent" if spawn_metadata(source) else "system_subagent"
     return "top_level"
 
 
@@ -60,6 +92,7 @@ class SessionParser:
         self.tracker = ChangeTracker()
         for key in ("events", "pending", "cells", "waits"):
             setattr(self.tracker, key, self.state["tracker"][key])
+        self.tracker.structured = StructuredChanges(self.state["tracker"].get("structured"))
         self.seen = set(self.state["messages_seen"])
 
     def consume(self, raw, end_offset):
@@ -82,11 +115,14 @@ class SessionParser:
         top, kind = event.get("type"), pl.get("type")
         self.state["record_boundaries"].append([end_offset, event.get("ordinal", self.state["ordinal"] - 1)])
         if top == "session_meta" and self.state["fact"] is None:
+            self.tracker.structured.state["cwd"] = str(pl.get("cwd") or "")
             sid = str(pl.get("id") or "")
             if not sid or not t:
                 return
             source = pl.get("source")
-            spawn = ((source.get("subagent") or {}).get("thread_spawn") or {}) if isinstance(source, dict) else {}
+            spawn = spawn_metadata(source)
+            for key in ("forked_from_id", "parent_thread_id"):
+                optional_text(pl.get(key), key)
             self.state["fact"] = {"id": sid, "segment_id": digest([sid, t]), "metadata_timestamp": t,
                 **project_identity(pl), "session_source": source_kind(source),
                 "parent_session_id": pl.get("forked_from_id") or pl.get("parent_thread_id") or spawn.get("parent_thread_id"),
@@ -96,10 +132,15 @@ class SessionParser:
         if fact is None:
             return
         if top == "turn_context" or kind == "thread_settings_applied":
-            settings = pl.get("thread_settings") or pl.get("settings") or pl
+            if isinstance(pl.get("cwd"), str):
+                self.tracker.structured.state["cwd"] = pl["cwd"]
+            thread_settings = optional_mapping(pl.get("thread_settings"), "thread_settings")
+            fallback_settings = optional_mapping(pl.get("settings"), "settings")
+            settings = thread_settings or fallback_settings or pl
+            optional_mapping(pl.get("git"), "git")
             for key, state_key in (("model", "model"), ("effort", "effort"), ("reasoning_effort", "effort")):
                 if key in settings:
-                    self.state[state_key] = settings[key]
+                    self.state[state_key] = optional_text(settings[key], key)
             for key in ("service_tier", "serviceTier"):
                 if key in settings:
                     self.state["tier"] = normalize_service_tier(settings[key])
@@ -118,7 +159,9 @@ class SessionParser:
                         edit["resolved_at"] = t
             fact["activity"].append(t)
         if kind == "token_count":
-            info = pl.get("info") or {}
+            info = optional_mapping(pl.get("info"), "token_info")
+            for key in ("total_token_usage", "last_token_usage"):
+                optional_mapping(info.get(key), key)
             if isinstance(info, dict) and t:
                 cumulative, last = normalize_usage(info.get("total_token_usage")), normalize_usage(info.get("last_token_usage"))
                 if cumulative is not None or last is not None:
@@ -146,6 +189,7 @@ class SessionParser:
     def checkpoint(self):
         self.state["messages_seen"] = sorted(self.seen)
         self.state["tracker"] = {key: getattr(self.tracker, key) for key in ("events", "pending", "cells", "waits")}
+        self.state["tracker"]["structured"] = self.tracker.structured.state
         return self.state
 
     def fact(self):

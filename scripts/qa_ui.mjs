@@ -1,11 +1,12 @@
 import {chromium} from '../frontend/node_modules/@playwright/test/index.mjs';
 import {mkdir} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {dirname,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import assert from 'node:assert/strict';
 
 const url=process.argv[2];
 const report=process.argv[3];
+const screenshot=process.argv[4] || 'docs/dashboard.png';
 const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
 const page=await browser.newPage({viewport:{width:1586,height:992}});
 const errors=[];
@@ -15,8 +16,8 @@ try {
  await page.locator('.kpi').first().waitFor();
  await page.locator('canvas').waitFor();
  await page.waitForTimeout(300);
- await mkdir('docs',{recursive:true});
- await page.screenshot({path:'docs/dashboard.png',fullPage:true});
+ await mkdir(dirname(screenshot),{recursive:true});
+ await page.screenshot({path:screenshot,fullPage:true});
  const original=await page.locator('.kpi>strong').first().textContent();
  await page.locator('[data-basis="output"]').click();
  await page.locator('[data-activity="cost"]').click();

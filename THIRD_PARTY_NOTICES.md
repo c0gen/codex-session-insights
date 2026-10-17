@@ -29,3 +29,5 @@ SOFTWARE.
 Chart.js (MIT) is bundled in the UI; its license notice is retained in the generated JavaScript. Python packaging retains the installed dependency metadata and licenses for pywebview (BSD-3-Clause), pythonnet (MIT), clr-loader (MIT), bottle (MIT), proxy-tools (BSD), watchdog (Apache-2.0), tzlocal (MIT), tzdata (Apache-2.0; IANA public-domain database), cffi (MIT), pycparser (BSD-3-Clause), and typing-extensions (PSF). Python is distributed under the PSF license. Build tools are not application features. Dependency versions are resolved by the lockfiles and release environment.
 
 This project is independent of OpenAI. Codex and OpenAI are trademarks of their respective owners.
+
+The retired Antigravity decoder fixtures use cryptography (Apache-2.0 or BSD-3-Clause), included with dependency metadata and license files. Application archive/key collection is disabled. Its schema catalog contains only field/type/enum definitions recovered from the locally installed reader; no archive keys or conversation content are distributed. pefile, Capstone and protobuf are developer-only static inspection tools.

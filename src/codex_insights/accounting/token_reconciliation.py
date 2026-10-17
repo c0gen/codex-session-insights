@@ -2,8 +2,9 @@
 """Parent/child token-trace reconciliation.
 
 Spawned Codex session logs can inherit cumulative token snapshots from their
-parent. Exact component-for-component matches are verified against any
-pre-spawn position in the parent trace. When an exact alignment is unavailable,
+parent. Exact component-for-component matches must also preserve the original
+event timestamp at a pre-spawn position in the parent trace. Equal counters
+alone do not establish inheritance. When an exact alignment is unavailable,
 response accounting removes initial baselines without discarding the first
 response. Paginated sources can name a verified physical history boundary.
 """
@@ -71,7 +72,7 @@ def _signature_positions(signatures):
 
 def _event_is_pre_spawn(item, spawn_timestamp):
     if spawn_timestamp is None:
-        return True
+        return False
     timestamp = item.get("timestamp")
     return timestamp is not None and timestamp <= spawn_timestamp
 
@@ -83,7 +84,12 @@ def _aligned_prefix_match(
     parent_positions=None,
     spawn_timestamp=None,
 ):
-    """Return the longest child-prefix match at any eligible parent offset."""
+    """Match a child prefix only when counters and pre-spawn timestamps agree.
+
+    A child can independently produce the same response and cumulative counts.
+    Copied history retains the parent's event time; a newly timed snapshot is
+    not verified replay, even when its counters happen to align.
+    """
     if not child_trace or not parent_trace:
         return 0, None
 
@@ -102,6 +108,8 @@ def _aligned_prefix_match(
             if not _event_is_pre_spawn(parent_trace[parent_index], spawn_timestamp):
                 break
             if child_signatures[matched] != parent_signatures[parent_index]:
+                break
+            if child_trace[matched].get("timestamp") != parent_trace[parent_index].get("timestamp"):
                 break
             matched += 1
         if matched > best_length or (
@@ -318,6 +326,9 @@ def reconcile_sessions(sessions, lineage_index, start, end):
                 cumulative is not None
                 and last_usage is not None
                 and usage_signature(cumulative) == usage_signature(last_usage)
+                and session.get("spawn_timestamp") is not None
+                and first.get("timestamp") is not None
+                and first["timestamp"] > session["spawn_timestamp"]
             ):
                 session["token_reconciliation_method"] = "child_local_counter"
                 session["token_reconciliation_confidence"] = "observed"

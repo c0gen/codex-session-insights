@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from .filter_options import normalize_selections
 
 
 def ui_directory():
@@ -17,8 +18,13 @@ def ui_directory():
 
 def anonymize(value):
     data = copy.deepcopy(value)
+    # A saved response can outlive its selected source or project.
+    data['filters'] = normalize_selections(data.get('filters'), data['options'], (s['id'] for s in data['sources']))
     projects = {p["id"]:{"id":f"project-{i+1}","name":f"Project {i+1}"} for i,p in enumerate(data["options"]["projects"])}
     for p in data["projects"]:
+        if p['project_id'] not in projects:
+            i = len(projects) + 1
+            projects[p['project_id']] = {'id': f'project-{i}', 'name': f'Project {i}'}
         replacement = projects[p["project_id"]]
         p.update(project_id=replacement["id"],name=replacement["name"])
     data["options"]["projects"] = list(projects.values())
@@ -33,9 +39,14 @@ def anonymize(value):
 
 
 def export_html(value, destination, anonymous=True):
-    data = anonymize(value) if anonymous else copy.deepcopy(value)
+    clean = copy.deepcopy(value)
+    for key in ("provider_allowances", "provider_setup", "account_token_total", "indexed_token_totals", "usage_limits", "accounts", "account_connections", "desktop", "project_merge", "project_migration_pending"):
+        clean.pop(key, None)
+    data = anonymize(clean) if anonymous else clean
     for source in data["sources"]:
         source["root"] = None
+        # Diagnostic files are local to this computer, even in named reports.
+        source["detail"] = source.get("detail", "").split(" Details: ", 1)[0]
     data.update(readonly=True,exporter=False,job={"running":False,"message":"Saved snapshot","error":None,"progress":{}})
     directory = ui_directory()
     if not (directory/"index.html").exists():

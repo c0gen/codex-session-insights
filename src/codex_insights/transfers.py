@@ -10,19 +10,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
-from .codec import dumps, loads, timestamp, unpack
+from .codec import digest, dumps, loads, timestamp, unpack
 from .parser import portable_fact, repository
-from .projection import project_segments
+from .projection import ensure_projection, project_segments
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 5
 MAX_BYTES = 4 * 1024**3
 MAX_LINE = 256 * 1024**2
-FACT_KEYS = set("id segment_id metadata_timestamp project_id project_label session_source parent_session_id spawn_timestamp history_mode history_base raw_token_trace messages change_events activity tools contexts prefix_hash byte_count record_count boundaries last_event_ordinal parse_errors record_boundaries proofs".split())
+FACT_KEYS = set("provider id segment_id metadata_timestamp project_id project_label session_source parent_session_id spawn_timestamp history_mode history_base raw_token_trace messages change_events activity tools contexts prefix_hash byte_count record_count boundaries last_event_ordinal parse_errors record_boundaries proofs".split())
+FACT_KEYS |= {'provenance','coverage','snapshot_mode','subagent_relationships'}
 
 
-def validate_fact(fact):
+def validate_fact(fact, version=FORMAT_VERSION):
     if not isinstance(fact, dict) or set(fact) - FACT_KEYS:
         raise ValueError("Unsupported fact fields; export with a compatible version")
+    from .providers import adapter
+    provider = fact.get("provider", "codex")
+    legacy = fact.get('snapshot_mode') == 'complete_binary'
+    public_steps = provider == 'antigravity' and fact.get('history_mode') == 'antigravity_steps'
+    if public_steps and version < 4:
+        raise ValueError('Public step accounting with unavailable components requires transfer v4')
+    if set(fact) & {'provenance','coverage','snapshot_mode','subagent_relationships'} and (not legacy or version < 3):
+        raise ValueError('Legacy facts require transfer v3')
+    adapter(provider)
+    if provider != "codex" and not str(fact.get("id", "")).startswith(provider + ":"):
+        raise ValueError("Invalid provider session namespace")
     required = {"id", "segment_id", "metadata_timestamp", "project_id", "project_label", "session_source", "raw_token_trace", "messages", "change_events", "activity", "prefix_hash", "byte_count", "record_count", "proofs"}
     if not required <= set(fact):
         raise ValueError("Incomplete session facts")
@@ -38,13 +50,20 @@ def validate_fact(fact):
         raise ValueError("Invalid project identity")
     if fact["session_source"] not in {"top_level", "spawned_subagent", "system_subagent"}:
         raise ValueError("Invalid session category")
+    if provider != "codex":
+        sid = fact["id"][len(provider) + 1:]
+        if fact["segment_id"] not in {digest([provider, sid, k]) for k in (("legacy",) if legacy else ("hook", "transcript"))}:
+            raise ValueError("Invalid provider segment namespace")
+        parent = fact.get("parent_session_id")
+        if parent is not None and (not isinstance(parent, str) or not parent.startswith(provider + ":")):
+            raise ValueError("Invalid provider parent namespace")
     for field in ("byte_count", "record_count", "parse_errors"):
         if type(fact.get(field, 0)) is not int or fact.get(field, 0) < 0:
             raise ValueError("Invalid fact count")
     if not timestamp(fact["metadata_timestamp"]):
         raise ValueError("Missing metadata timestamp")
     allowed = {
-        "raw_token_trace": set("timestamp ordinal end_byte_offset cumulative_usage last_usage model effort service_tier model_context_window".split()),
+        "raw_token_trace": set("timestamp ordinal end_byte_offset cumulative_usage last_usage model effort service_tier speed inference_geo model_context_window response_id cache_creation recorded_components invocation_id model_enum".split()),
         "messages": {"timestamp", "role", "signature", "model"},
         "change_events": set("added removed files supported unknown_size result_files timestamp call_id index digest outcome direct resolved_at model".split()),
         "contexts": {"timestamp", "model", "effort", "service_tier"},
@@ -71,14 +90,39 @@ def validate_fact(fact):
         if message.get("role") not in {"user", "assistant"} or not re.fullmatch(r"[0-9a-f]{64}", message.get("signature", "")):
             raise ValueError("Invalid portable message")
     for event in fact["raw_token_trace"]:
+        if set(event) & {"speed", "inference_geo"} and (provider != "claude_code" or version < 5):
+            raise ValueError("Claude pricing metadata requires transfer v5")
+        if provider == "claude_code":
+            from .providers.claude_pricing import METADATA_VALUES
+            for key, values in METADATA_VALUES.items():
+                if key in event and (not isinstance(event[key], str) or event[key] not in values):
+                    raise ValueError("Invalid Claude pricing metadata")
+        if provider != "codex":
+            if not isinstance(event.get("response_id"), str) or not re.fullmatch(r"[0-9a-f]{64}", event["response_id"]):
+                raise ValueError("Missing stable response identity")
+            creation = event.get("cache_creation")
+            if creation is not None and (not isinstance(creation, dict) or set(creation) != {"ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"} or any(type(v) is not int or v < 0 for v in creation.values())):
+                raise ValueError("Invalid cache creation counters")
         for key in ("cumulative_usage", "last_usage"):
             usage = event.get(key)
-            if usage is not None and (not isinstance(usage, dict) or set(usage) - set("input_tokens cached_input_tokens cache_write_input_tokens output_tokens reasoning_output_tokens total_tokens".split()) or any(type(v) is not int or v < 0 for v in usage.values())):
+            if usage is not None and (not isinstance(usage, dict) or set(usage) - set("input_tokens cached_input_tokens cache_write_input_tokens output_tokens reasoning_output_tokens total_tokens".split()) or any((v is None and not (legacy or public_steps)) or (v is not None and (type(v) is not int or v < 0)) for v in usage.values())):
                 raise ValueError("Invalid token counters")
+        if not legacy and set(event) & {'recorded_components','invocation_id','model_enum'}:
+            raise ValueError('Recorded legacy components require transfer v3')
+        if legacy and not re.fullmatch('[0-9a-f]{64}', event.get('invocation_id','')):
+            raise ValueError('Invalid invocation identity')
+        if legacy and (type(event.get('model_enum')) is not int or event['model_enum'] < 0 or event['model_enum'] > 2**31 - 1):
+            raise ValueError('Invalid legacy model enum')
+    if legacy:
+        from .providers.legacy.transfer import validate_legacy
+        validate_legacy(fact)
+    fact.setdefault("provider", "codex")
     return fact
 
 
 def export_snapshot(store, destination, label="This computer", progress=None, cancel=None):
+    if cancel and cancel.is_set():
+        raise InterruptedError('Export cancelled')
     destination = Path(destination).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     revision = store.setting("export_revision", 0) + 1
@@ -90,7 +134,7 @@ def export_snapshot(store, destination, label="This computer", progress=None, ca
             # Canonical local candidates only: never recirculate imported snapshots.
             # Select locally observed facts even when a longer imported copy is canonical.
             # One candidate per segment; the importer will verify all copy prefixes.
-            rows = db.execute("SELECT c.segment_id,c.fact FROM candidates c JOIN sources s ON s.id=c.source_id LEFT JOIN canonical k ON k.segment_id=c.segment_id WHERE s.kind='folder' AND s.enabled=1 ORDER BY c.segment_id,CASE WHEN c.source_id=k.source_id THEN 0 ELSE 1 END,c.record_count DESC,c.source_id")
+            rows = db.execute("SELECT c.segment_id,c.fact FROM candidates c JOIN sources s ON s.id=c.source_id LEFT JOIN canonical k ON k.segment_id=c.segment_id WHERE s.kind IN ('folder','bridge') AND s.enabled=1 ORDER BY c.segment_id,CASE WHEN c.source_id=k.source_id THEN 0 ELSE 1 END,c.record_count DESC,c.source_id")
             previous = None
             for row in rows:
                 if cancel and cancel.is_set():
@@ -111,12 +155,15 @@ def export_snapshot(store, destination, label="This computer", progress=None, ca
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
             bundle.writestr("manifest.json", json.dumps(manifest))
             bundle.write(facts_path, "facts.jsonl")
+        if cancel and cancel.is_set():
+            raise InterruptedError('Export cancelled')
         os.replace(archive, destination)
     store.set_setting("export_revision", revision)
     return {"path": str(destination), "sessions": count, "bytes": destination.stat().st_size, "revision": revision}
 
 
 def import_snapshot(store, path, progress=None, cancel=None):
+    ensure_projection(store)
     path = Path(path).resolve()
     with zipfile.ZipFile(path) as bundle:
         if sorted(bundle.namelist()) != ["facts.jsonl", "manifest.json"]:
@@ -124,7 +171,7 @@ def import_snapshot(store, path, progress=None, cancel=None):
         if bundle.getinfo("manifest.json").file_size > 64 * 1024 or bundle.getinfo("facts.jsonl").file_size > MAX_BYTES:
             raise ValueError("Snapshot exceeds the supported size limit")
         manifest = json.loads(bundle.read("manifest.json"))
-        if manifest.get("format") != "codex-session-insights" or manifest.get("format_version") != FORMAT_VERSION:
+        if manifest.get("format") != "codex-session-insights" or manifest.get("format_version") not in (1, 2, 3, 4, FORMAT_VERSION):
             raise ValueError("Unsupported snapshot version; update the app or exporter")
         exporter = manifest.get("exporter_id")
         if not isinstance(exporter, str) or not re.fullmatch(r"[a-zA-Z0-9-]{1,64}", exporter):
@@ -154,6 +201,7 @@ def import_snapshot(store, path, progress=None, cancel=None):
                 source_id, str(manifest.get("label") or "Imported computer")[:200], revision, manifest.get("created_at")))
             count = 0
             seen = set()
+            providers = set()
             with bundle.open("facts.jsonl") as stream:
                 while True:
                     line = stream.readline(MAX_LINE + 1)
@@ -163,15 +211,22 @@ def import_snapshot(store, path, progress=None, cancel=None):
                         raise InterruptedError('Import cancelled')
                     if len(line) > MAX_LINE or not line.endswith(b"\n"):
                         raise ValueError("Invalid or oversized fact record")
-                    fact = validate_fact(loads(line.decode("utf-8")))
+                    fact = loads(line.decode("utf-8"))
+                    if manifest["format_version"] == 1:
+                        if fact.get("provider", "codex") != "codex":
+                            raise ValueError("Version 1 only supports Codex")
+                        fact["provider"] = "codex"
+                    fact = validate_fact(fact, manifest['format_version'])
                     if fact["segment_id"] in seen:
                         raise ValueError("Duplicate session segment in snapshot")
                     seen.add(fact["segment_id"]); segments.add(fact["segment_id"])
+                    providers.add(fact.get("provider", "codex"))
                     store.put_candidate(db, source_id, fact); count += 1
                     if progress and count % 50 == 0:
                         progress({'sessions':count,'phase':'Reading snapshot facts'})
             if count != manifest.get("fact_count"):
                 raise ValueError("Snapshot session count does not match")
+            db.execute("UPDATE sources SET provider=? WHERE id=?", (next(iter(providers)) if len(providers) == 1 else "mixed" if providers else "codex", source_id))
             changed = {s for s in segments if store.choose_canonical(db, s)}
             if progress:
                 progress({'sessions':count,'phase':'Updating dashboard index'})

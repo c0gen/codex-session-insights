@@ -1,0 +1,50 @@
+{
+  "owner": "filter-state",
+  "bugs": [
+    "B4",
+    "B5"
+  ],
+  "outcome": "implemented_and_verified",
+  "changed_files": [
+    "frontend/src/main.ts",
+    "frontend/src/filter-state.ts",
+    "scripts/qa_filter_state_unit.mjs",
+    "scripts/qa_filter_state.mjs",
+    "docs/bugfix-plans/status/filters.json"
+  ],
+  "changes": [
+    "Validate restored JSON, complete filter shape, supported ranges, real calendar dates and chronological order; recover invalid preferences to All time with an explanation.",
+    "Separate mutable draft controls, pending requests and applied response filters in a focused controller. Persist only successfully applied validated filters.",
+    "Freeze an export snapshot when the HTML export dialog opens, preserving displayed filters during pending requests or later completions.",
+    "Ignore stale responses, keep background refresh from superseding pending user requests, retain unsaved date drafts across refresh/navigation, and preserve normalized merged project IDs.",
+    "Keep summary image loading state and applied data filters consistent, including failed requests."
+  ],
+  "reproduction": "Reviewed the original failure paths and existing review-frontend/repro.mjs evidence. Added browser regression scenarios for selecting Custom then reloading, reversed dates, corrupted preferences, and Custom -> All -> unapplied Custom export; all pass with the fix.",
+  "tests": [
+    {
+      "command": "node scripts/qa_filter_state_unit.mjs",
+      "result": "passed",
+      "coverage": "Restore shape/calendar validation, rejected/failed requests, applied-only export, immutable snapshots, out-of-order responses, automatic refresh/draft preservation and normalized merged IDs."
+    },
+    {
+      "command": "npm --prefix frontend run typecheck",
+      "result": "passed"
+    },
+    {
+      "command": "node scripts/qa_filter_state.mjs",
+      "result": "passed in headless Edge outside the sandbox",
+      "coverage": "Startup recovery, fresh Custom reload, invalid Apply without request/storage mutation, unapplied/pending exports, out-of-order completion, rejected backend query recovery, navigation, export-modal completion and background date editing."
+    },
+    {
+      "command": "git diff --check -- frontend/src/main.ts",
+      "result": "passed"
+    }
+  ],
+  "test_environment": "Browser script starts its own ephemeral Vite development server and intercepts every API endpoint with synthetic responses. It uses a fresh browser context, no backend/account credentials/session logs/database, and never builds shared frontend/dist. Initial sandboxed Edge launch failed; escalated isolated execution succeeded.",
+  "unresolved_issues": [],
+  "required_integration_work": [
+    "Run the integration-owned frontend production build and combined browser suite after all owners finish. Include both new filter QA scripts in combined acceptance."
+  ],
+  "backend_export_contract_requirement": "No backend change is required for B4/B5: existing export_html accepts the immutable applied Filters snapshot. It retains its existing behavior of querying current indexed data at export time rather than exporting a frozen data revision.",
+  "optional_notification": "notify_andy tools were not available in this chat."
+}

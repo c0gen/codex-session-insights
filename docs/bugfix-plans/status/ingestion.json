@@ -1,0 +1,50 @@
+{
+  "owner": "ingestion",
+  "bug_ids": ["B1", "B6"],
+  "outcome": "implemented_and_focused_tests_passed",
+  "changed_files": [
+    "src/codex_insights/storage.py",
+    "src/codex_insights/parser.py",
+    "tests/test_duplicate_file_history.py",
+    "tests/test_malformed_session_isolation.py",
+    "docs/bugfix-plans/status/ingestion.json"
+  ],
+  "bug_outcomes": {
+    "B1": "Candidate insertion verifies byte-boundary prefix proofs before replacement. Shorter prefixes cannot overwrite fuller accepted history; identical bytes can be reparsed and proven extensions can advance. Divergent copies retain accepted facts and set a bounded, persistent same_source_conflict flag exposed through existing canonical conflicts coverage. Conflict-only changes queue projection/revision updates. Reproduction retains 330 tokens, including unchanged refresh and restart.",
+    "B6": "Parser validates optional git, source/subagent/thread_spawn, parent identifier, settings/model/effort, and token-info/usage object shapes. Invalid nested data raises a handled ValueError; optional null/omitted data and string subagent enum variants remain supported. Existing per-file failure handling preserves prior facts/checkpoints, records safe diagnostics, continues healthy files, suppresses unchanged automatic retries, and retries manual refreshes. Reproduction indexes the healthy 110-token session. Unexpected AttributeError defects still propagate."
+  },
+  "upgrade_behavior": {
+    "parser_version": 3,
+    "schema": "Idempotently adds candidates.same_source_conflict INTEGER NOT NULL DEFAULT 0; keeps existing candidate keys, source IDs, fact format, and transfer schema.",
+    "online_sources": "The existing parser-version checkpoint mechanism reparses each older physical file once, recovering the fuller history previously hidden by a shorter candidate. Existing transactional checkpoints/projection_queue retain restart and cancellation behavior.",
+    "offline_sources": "Keep accepted contributions; old checkpoints remain pending and reparse after reconnect. Disabled sources similarly wait until enabled.",
+    "imports": "Snapshot import/export remains compatible and accepted fuller histories round-trip without private paths. A snapshot that already discarded the longer history cannot recreate missing raw facts; recovery requires the originating files or a corrected snapshot."
+  },
+  "tests": [
+    {
+      "command": "python -m pytest tests/test_duplicate_file_history.py tests/test_malformed_session_isolation.py -q --basetemp=.local-data/ingestion-owner-red",
+      "result": "Before fixes: 12 failed, 1 passed. Confirmed the 110-versus-330 overwrite and uncaught malformed-git AttributeError."
+    },
+    {
+      "command": ".venv/Scripts/python.exe -m pytest tests/test_duplicate_file_history.py tests/test_malformed_session_isolation.py tests/test_engine.py tests/test_index_failures.py tests/test_change_backfill.py tests/test_structured_changes.py -q --basetemp=.local-data/ingestion-owner-acceptance-final",
+      "result": "64 passed in 16.85s after all final code changes."
+    },
+    {
+      "command": "git diff --check -- src/codex_insights/storage.py src/codex_insights/parser.py",
+      "result": "Passed; reviewed relevant diff while preserving pre-existing changes."
+    }
+  ],
+  "unresolved_issues": [],
+  "design_limits": [
+    "One accepted history plus a conflict bit is retained per source/segment, rather than unbounded duplicate facts. The warning records observed divergence conservatively and remains across rebuilds even if the divergent file is later removed; forgetting the source removes it.",
+    "Same-source conflict diagnostics are local catalog metadata, not new fields in portable facts. Snapshots export the accepted history with no physical-file provenance.",
+    "Raw-log rewrite with a divergent prefix is treated conservatively as a conflicting history, retaining previously accepted facts."
+  ],
+  "required_integration_work": [
+    "Run combined Python/frontend/browser acceptance after all owners finish; this owner ran scoped synthetic tests only.",
+    "Preserve PARSER_VERSION=3 (or a later integrated version) so stale local checkpoints are revisited.",
+    "Implement the separately assigned replay-accounting projection upgrade for existing local/imported facts; the parser bump alone cannot reproject imported snapshots.",
+    "Document one-time local reparse, offline recovery, and persistent conflict warnings in the shared repair documentation. No transfer-format or projection code change is required by these ingestion fixes."
+  ],
+  "safety": "Only synthetic session fixtures and isolated databases under unique .local-data test directories were used. No original session logs, real credentials, commits, releases, or unrelated-owner files were modified. Optional notify_andy tools were not available."
+}

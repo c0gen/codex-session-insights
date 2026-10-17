@@ -1,0 +1,62 @@
+{
+  "parentThreadId": "01a128c9-c881-78a2-b158-ec9d235ffa27",
+  "appRoot": "E:/Codex/2026-05-24/codex-session-insights-c-users-andyc/desktop-app",
+  "model": "gpt-6-astra",
+  "reasoningEffort": "medium",
+  "implementationChats": [
+    {
+      "key": "ingestion",
+      "title": "Fix session ingestion and malformed logs",
+      "plan": "01-ingestion.md",
+      "bugs": [
+        "B1",
+        "B6"
+      ],
+      "threadId": "01a128d3-e423-7133-bdae-aa2d49c6d310",
+      "hostId": "local"
+    },
+    {
+      "key": "replay",
+      "title": "Fix child token replay accounting",
+      "plan": "02-replay-accounting.md",
+      "bugs": [
+        "B2"
+      ],
+      "threadId": "01a128d3-eff1-7671-b007-ded11bd037e2",
+      "hostId": "local"
+    },
+    {
+      "key": "accounts",
+      "title": "Fix account identity deduplication",
+      "plan": "03-account-identity.md",
+      "bugs": [
+        "B3"
+      ],
+      "threadId": "01a128d3-fe17-7f30-9303-2c5f1f9103ea",
+      "hostId": "local"
+    },
+    {
+      "key": "filters",
+      "title": "Fix saved filters and HTML exports",
+      "plan": "04-filter-state.md",
+      "bugs": [
+        "B4",
+        "B5"
+      ],
+      "threadId": "01a128d4-0ba7-7991-9a8f-1d1734411119",
+      "hostId": "local"
+    }
+  ],
+  "existingRelatedChat": {
+    "threadId": "01a128b7-6eac-7683-a3e2-b14cfd991ccd",
+    "hostId": "local",
+    "title": "Add token burn rate metric",
+    "coordination": "Read status only; preserve work and wait before editing overlapping files."
+  },
+  "integrationChat": {
+    "threadId": "01a128d4-64aa-7310-a18d-f075337956f7",
+    "hostId": "local",
+    "title": "Integrate and verify app bug fixes",
+    "plan": "05-integration.md"
+  }
+}

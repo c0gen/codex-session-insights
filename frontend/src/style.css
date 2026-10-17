@@ -201,6 +201,16 @@ small {
   align-items: center;
   font-size: 11px;
 }
+.source-more {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 0 0 27px;
+}
+.source-more:hover {
+  color: var(--mint);
+}
 .dot {
   height: 8px;
   width: 8px;
@@ -291,8 +301,34 @@ small {
 .button.small {
   padding: 6px 12px;
 }
+/* Disabled buttons must not keep the primary call-to-action look. */
+.button:disabled,
+.button:disabled:hover {
+  opacity: 0.5;
+  border-color: #36464f;
+  background: transparent;
+  color: var(--muted);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .button.icon-only {
   padding: 10px;
+}
+#refresh {
+  width: 43px;
+  height: 43px;
+  flex-shrink: 0;
+}
+#refresh.refreshing svg {
+  animation: spin 1s linear infinite;
+  transform-origin: center;
+  transform-box: fill-box;
 }
 .icon-button {
   border: 0;
@@ -322,10 +358,19 @@ select {
   cursor: pointer;
   color-scheme: dark;
 }
+/* Long project and model names are capped so five filters fit one row at 1250px. */
+.filters select {
+  min-width: 118px;
+  max-width: 168px;
+  text-overflow: ellipsis;
+}
 .date-caption {
   font-size: 12px;
   color: #c5d0df;
   margin-left: 10px;
+}
+#filters-reset {
+  padding: 4px 2px;
 }
 .date-fields {
   width: 100%;
@@ -383,13 +428,17 @@ select {
   font-size: 12px;
   margin-top: 7px;
 }
+/* Added and removed stay side by side; the type shrinks with the card instead of wrapping. */
 .change-values {
   display: flex;
   justify-content: space-between;
   gap: 12px;
 }
+.change-values > div:last-child {
+  text-align: right;
+}
 .change-values strong {
-  font-size: 26px;
+  font-size: clamp(18px, 1.65vw, 26px);
   letter-spacing: -0.025em;
   white-space: nowrap;
   color: var(--mint);
@@ -405,6 +454,20 @@ select {
 }
 .change-values > div:last-child small {
   color: var(--red);
+}
+.change-total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.change-total strong {
+  font-size: 17px;
 }
 .overview-middle {
   display: grid;
@@ -724,6 +787,8 @@ select {
 }
 .table-scroll {
   overflow-x: auto;
+  /* Contains absolutely positioned hidden labels inside the scrolled table. */
+  position: relative;
 }
 table {
   width: 100%;
@@ -847,12 +912,34 @@ input[type="checkbox"] {
 .danger {
   color: var(--red);
 }
+.source-card .fine-print {
+  padding: 0 0 12px;
+}
 .source-help {
-  padding: 23px;
+  padding: 18px 23px;
   margin-top: 16px;
 }
+.source-help summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.source-help summary::before {
+  content: "▸";
+  color: var(--muted);
+}
+.source-help[open] summary::before {
+  content: "▾";
+}
+.source-help summary::-webkit-details-marker {
+  display: none;
+}
 .source-help h2 {
-  margin-bottom: 12px;
+  font-size: 16px;
+}
+.source-help[open] summary {
+  margin-bottom: 8px;
 }
 .source-help p {
   font-size: 13px;
@@ -902,6 +989,12 @@ input[type="checkbox"] {
   color: #d9c99e;
   font-size: 12px;
 }
+.coverage-note.minor {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+  padding: 8px 13px;
+}
 .spinner {
   border: 2px solid #375b52;
   border-top-color: var(--mint);
@@ -940,9 +1033,14 @@ input[type="checkbox"] {
   border-radius: 10px;
   width: min(500px, 90vw);
   box-shadow: 0 25px 100px #0009;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
 }
 .modal-body {
   padding: 5px 22px 20px;
+  min-height: 0;
+  overflow-y: auto;
 }
 .modal-body > label {
   display: flex;
@@ -972,6 +1070,23 @@ input[type="checkbox"] {
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
+}
+.modal-body .settings-section {
+  margin: 18px 0 10px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.modal-body .settings-section:first-child {
+  margin-top: 4px;
+}
+.modal-body .settings-error {
+  color: #e5a698;
+  font-size: 12px;
+  margin: -10px 0 16px;
+}
+.modal-body > .toggle-label {
+  margin-bottom: 8px;
 }
 .modal .panel-heading {
   align-items: center;
@@ -1054,6 +1169,9 @@ input[type="checkbox"] {
   .kpi {
     min-height: 130px;
   }
+  .change-values strong {
+    font-size: 24px;
+  }
   .equivalent {
     gap: 11px;
     padding: 8px;
@@ -1079,6 +1197,10 @@ input[type="checkbox"] {
   .source-mini {
     padding: 15px;
   }
+  .local-note {
+    padding: 20px 15px;
+    white-space: nowrap;
+  }
   .chart-area {
     height: 250px;
   }
@@ -1100,13 +1222,20 @@ input[type="checkbox"] {
   .nav-item span,
   .badge,
   .source-mini,
-  .local-note svg:last-child {
+  .local-note svg:first-child {
     display: none;
   }
+  /* The rail keeps only the gear, so the button still reads as Settings. */
   .local-note {
     font-size: 0;
     padding: 22px;
     gap: 0;
+    justify-content: center;
+  }
+  .local-note svg:last-child {
+    margin: 0;
+    width: 21px;
+    height: 21px;
   }
   .main {
     margin-left: 70px;
@@ -1114,7 +1243,7 @@ input[type="checkbox"] {
   }
   .overview-middle,
   .usage-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .highlights {
     display: grid;
@@ -1159,8 +1288,25 @@ input[type="checkbox"] {
     flex-wrap: wrap;
   }
 }
+@media (max-width: 600px) {
+  .kpis {
+    grid-template-columns: 1fr;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .spinner {
+  .spinner,
+  #refresh.refreshing svg {
     animation: none;
   }
 }
+
+.provider-allowances { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 16px; }
+.provider-setup p { color: var(--muted); font-size: 12px; }
+.provider-setup { padding: 20px; margin-bottom: 16px; }
+.provider-setup-rows { margin: 14px 0; }
+.provider-setup article { display: grid; grid-template-columns: 9.5rem 7.5rem minmax(0, 1fr); gap: 10px 16px; align-items: center; padding: 8px 0; border-bottom: 1px solid #293941; }
+.provider-setup article:last-child { border-bottom: 0; }
+.provider-setup article .status-pill { margin-left: 0; justify-self: start; }
+.provider-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 600px) { .provider-setup article { grid-template-columns: 1fr auto; } .provider-setup-actions { grid-column: 1 / -1; } }
+.provider-setup pre, .modal pre { white-space: pre-wrap; overflow-wrap: anywhere; }

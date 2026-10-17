@@ -1,4 +1,4 @@
-from codex_insights.cli import main
+from codex_insights.launcher import launch
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    raise SystemExit(launch())
