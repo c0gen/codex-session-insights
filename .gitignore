@@ -1,13 +1,40 @@
+# Python
 .venv/
-.local-data/
-.pytest_cache/
 __pycache__/
+*.py[cod]
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend
 node_modules/
+
+# Build output (PyInstaller, py2app, Vite, release archives)
 build/
 dist/
 release/
+
+# Local data, test scratch and personal usage output
+.local-data/
 *.sqlite*
 *.log
 *.codex-insights
 !tests/fixtures/*.codex-insights
+codex-insights-report*.html
+codex-summary*.png
+.env
+.env.*
+
+# Personal tool settings
+.claude/settings.local.json
+CLAUDE.local.md
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

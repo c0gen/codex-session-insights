@@ -38,14 +38,14 @@ Copy exhibit / Save PNG captures the current view at 1200 × 720, under 2 MiB, w
 
 ## AI Design sources and delivery
 
-Authoring project: `G:\AI Design\projects\three_d\projects\token-worlds`.
+Authoring project: `token-worlds` in the AI Design workspace (kept outside this repository).
 
 - `source/build.py` and `source/geometry.py` reproduce fourteen measured props in Blender. `source/asset.blend` is the editable review board; the build script exports individual props at physical scale before arranging the board.
 - Each GLB uses metres, +Y up, applied transforms, a ground-centre origin and named `<asset>-anchor-ground` / `<asset>-anchor-top` nodes. Materials are embedded colors; no images or decoder dependencies are required.
 - The runtime pack is **300,500 bytes** before embedding. Repeated props stay below 2,000 triangles and landmarks below 20,000. The largest landmark has 1,824 triangles. Small authored geometry and material merging avoid the need for an external compression decoder.
 - `frontend/src/worlds/assets/manifest.json` records dimensions, bounds, triangle/byte counts, SHA-256, source revision, artifact IDs, provenance, review views and validation/bundle evidence. Only runtime GLBs and this manifest are copied into the frontend.
 - Final build/render/export/validation job: `30ab5c84da11480c941ade95a279c499`. Validation artifact: `1a06b951eeca8c8967e832aec9540b7a`. Source revision: `d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02`.
-- Digital package job: `ff52f026c401474c9b7d516b496df284`. Package: `G:\AI Design\.local\runs\ff52f026c401474c9b7d516b496df284\operation\token-worlds-runtime-v2.zip`. Package SHA-256: `99c47a52d6a8c33eabdee64f6508945ef97aa9ce19b20791dac9d3751d9ed7c5`.
+- Digital package job: `ff52f026c401474c9b7d516b496df284`. Package: `token-worlds-runtime-v2.zip`. Package SHA-256: `99c47a52d6a8c33eabdee64f6508945ef97aa9ce19b20791dac9d3751d9ed7c5`.
 
 Front, side, three-quarter, clay and textured views were inspected and accepted separately from technical validation. Orthographic kit views overlap some props; the three-quarter view resolves them. The models intentionally use simplified recognizable silhouettes. Previous run directories retain earlier revisions and diagnostics.
 
