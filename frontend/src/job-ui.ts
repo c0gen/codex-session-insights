@@ -1,6 +1,5 @@
 import type { ActionResponse, Job, JobCompletion } from "./types";
-import { compact } from "./format";
-import { count } from "./ui";
+import { showJobNotice } from "./job-notice";
 
 export function showJob(job: Job, cancel: () => void) {
   const automatic = job.running && job.origin === "automatic";
@@ -11,29 +10,8 @@ export function showJob(job: Job, cancel: () => void) {
     refresh.setAttribute("aria-label", automatic ? "Updating usage" : "Refresh insights");
     refresh.title = automatic ? "Updating usage" : "Refresh insights";
   }
-  const queued = job.queued || [];
   const foreground = job.running && job.origin !== "automatic";
-  const banner = document.querySelector<HTMLElement>("#job-banner");
-  if (banner) {
-    banner.hidden = !foreground && !queued.length;
-    if (!banner.children.length) {
-      banner.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="job-message"></span><span class="job-queue"></span><button class="text-button" id="cancel-job">Cancel</button>';
-    }
-    const progress = job.progress || {};
-    const detail = progress.sessions
-      ? ` · ${count(progress.sessions)} session facts`
-      : progress.files
-        ? ` · ${count(progress.files)} files checked · ${compact((progress.bytes_read || 0) / 1024 / 1024)} MB read`
-        : "";
-    banner.querySelector(".job-message")!.textContent = foreground
-      ? `${progress.phase || job.message}${detail}`
-      : queued.length ? `Queued · ${queued[0].message}` : "";
-    banner.querySelector(".job-queue")!.textContent = foreground && queued.length
-      ? ` · ${queued.length} queued` : "";
-    const button = banner.querySelector<HTMLButtonElement>("#cancel-job")!;
-    button.hidden = !foreground || job.cancelable === false;
-    button.onclick = cancel;
-  }
+  showJobNotice(job, cancel);
   const label = document.querySelector("#update-label");
   if (label) label.textContent = foreground ? job.message : "Updated just now";
 }

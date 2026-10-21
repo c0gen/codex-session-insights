@@ -3,20 +3,8 @@ from ..codec import unpack
 
 
 def accounting_segments(db):
-    groups = {}
-    for row in db.execute("SELECT segment_id,fact FROM canonical WHERE provider!='codex'"):
-        fact = unpack(row['fact'])
-        groups.setdefault((fact['provider'], fact['id']), []).append((row['segment_id'], fact))
-    suppressed = set()
-    for entries in groups.values():
-        legacy = [sid for sid, fact in entries if fact.get('snapshot_mode') == 'complete_binary']
-        other = [sid for sid, fact in entries if fact.get('snapshot_mode') != 'complete_binary']
-        if legacy and other:
-            # The verified conversation identity overlaps, but message/edit
-            # identities across formats may not align. Accept one accounting
-            # format and expose the unresolved overlap; do not add both.
-            suppressed.update(other)
-    return suppressed
+    from ..history_overlaps import groups
+    return set().union(*(g['suppressed'] for g in groups(db)))
 
 
 def completeness(item):
@@ -28,7 +16,21 @@ def completeness(item):
     return sum(v is not None for v in values), sum(v or 0 for v in values), cache_known, metadata
 
 
-def response_owners(db):
+def response_owners(db, segments=None, suppressed=None):
+    if segments is not None:
+        import json
+        owners = {}
+        suppressed = suppressed or set()
+        for segment in segments:
+            for row in db.execute('SELECT b.* FROM response_claims a JOIN response_claims b '
+                    'ON b.provider=a.provider AND b.response_id=a.response_id WHERE a.segment_id=? ORDER BY b.segment_id', (segment,)):
+                if row['segment_id'] in suppressed:
+                    continue
+                key, quality = (row['provider'], row['response_id']), tuple(json.loads(row['quality']))
+                previous = owners.get(key)
+                if previous is None or quality > previous[1] or (quality == previous[1] and row['segment_id'] < previous[0]):
+                    owners[key] = (row['segment_id'], quality)
+        return owners
     owners = {}
     suppressed = accounting_segments(db)
     for row in db.execute("SELECT segment_id,fact FROM canonical WHERE provider!='codex' ORDER BY segment_id"):

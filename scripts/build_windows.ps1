@@ -2,18 +2,22 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
 try {
+    & .venv/Scripts/python.exe scripts/check_sqlite_runtime.py
+    if ($LASTEXITCODE) { throw 'Release SQLite runtime gate failed' }
     & (Join-Path $PSScriptRoot 'check.ps1')
     $appVersion = & .venv/Scripts/python.exe -c "from codex_insights import __version__; print(__version__)"
     if ($LASTEXITCODE) { throw 'Could not read the app version' }
     & .venv/Scripts/python.exe -m PyInstaller --noconfirm packaging/windows.spec
     if ($LASTEXITCODE) { throw 'Windows build failed' }
+    & .venv/Scripts/python.exe scripts/check_sqlite_runtime.py dist/CodexSessionInsights/CodexSessionInsights.exe
+    if ($LASTEXITCODE) { throw 'Packaged SQLite runtime gate failed' }
     & .venv/Scripts/python.exe -m PyInstaller --noconfirm packaging/bridge.spec
     if ($LASTEXITCODE) { throw 'Bridge build failed' }
     Copy-Item -LiteralPath dist/CodexInsightsBridge.exe -Destination dist/CodexSessionInsights
     & .venv/Scripts/python.exe scripts/smoke_bridge.py dist/CodexSessionInsights/CodexInsightsBridge.exe
     if ($LASTEXITCODE) { throw 'Packaged bridge smoke test failed' }
     & .venv/Scripts/python.exe scripts/smoke_exporter.py dist/CodexSessionInsights/CodexSessionInsights.exe
-    if ($LASTEXITCODE) { throw 'Packaged v5 exporter/importer smoke test failed' }
+    if ($LASTEXITCODE) { throw 'Packaged v6 exporter/importer smoke test failed' }
     Copy-Item -LiteralPath packaging/Start.cmd, 'packaging/Startup diagnostics.cmd' -Destination dist/CodexSessionInsights
     New-Item -ItemType Directory -Force release | Out-Null
     $archivePath = "release/CodexSessionInsights-$appVersion-windows-x64.zip"

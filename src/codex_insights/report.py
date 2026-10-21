@@ -44,11 +44,17 @@ def export_html(value, destination, anonymous=True):
         clean.pop(key, None)
     data = anonymize(clean) if anonymous else clean
     for source in data["sources"]:
+        source.pop("index_health", None)
         source["root"] = None
         # Diagnostic files are local to this computer, even in named reports.
         source["detail"] = source.get("detail", "").split(" Details: ", 1)[0]
     data.update(readonly=True,exporter=False,job={"running":False,"message":"Saved snapshot","error":None,"progress":{}})
     directory = ui_directory()
+    if (directory / 'report' / 'index.html').is_file():
+        directory = directory / 'report'
+    elif (directory / 'index.html').is_file() and 'import(' in ''.join(
+            p.read_text(encoding='utf-8') for p in (directory / 'assets').glob('*.js')):
+        raise ValueError('Build the offline report assets first: cd frontend && npm run build')
     if not (directory/"index.html").exists():
         raise ValueError("Build the UI first: cd frontend && npm run build")
     html = (directory/"index.html").read_text(encoding="utf-8")

@@ -1,134 +1,70 @@
-"""Only appended complete lines are read during normal refreshes."""
-import hashlib
-import json
+"""Shared synchronous entry point for resumable local indexing."""
 import os
-from datetime import datetime, timezone
+import time
 from pathlib import Path
-
-from .codec import pack, unpack
-from .index_failures import FileFailures
-from .parser import PARSER_VERSION, portable_fact
-from .providers import adapter
-from .projection import ensure_projection, project_segments
-
-
-def anchor(path, offset):
-    with path.open("rb") as stream:
-        stream.seek(max(0, offset - 4096))
-        return hashlib.sha256(stream.read(min(offset, 4096))).hexdigest()
+from .parser import PARSER_VERSION
+from .projection import ensure_projection
+from .index_file import anchor
+from .index_scan import Scan
 
 
 def refresh(store, progress=None, cancel=None, rebuild=False, automatic=False):
     ensure_projection(store)
     report = {"files": 0, "changed_files": 0, "bytes_read": 0, "errors": 0, "skipped_errors": 0}
-    def flush_changes():
-        # Queue entries commit with checkpoints; a restart cannot skip an edit
-        # whose canonical facts were saved before its projection was rebuilt.
-        with store.lock, store.connect() as db:
-            changed = {row[0] for row in db.execute("SELECT segment_id FROM projection_queue")}
-            if changed:
-                project_segments(store, db, store.related_segments(db, changed))
-                db.execute("DELETE FROM projection_queue")
-                db.execute("INSERT OR REPLACE INTO settings VALUES('data_revision',?)", (json.dumps(store.setting("data_revision", 0) + 1),))
-    flush_changes()
-    sources = [s for s in store.sources() if s["kind"] in {"folder", "bridge"} and s["enabled"]]
+    sources = [s for s in store.sources() if s['kind'] in {'folder', 'bridge'} and s['enabled'] and s['root']]
+    local = [s for s in sources if s['provider'] == 'codex']
+    hints = getattr(store, 'live_paths', None)
+    if hints:
+        hints.prune({s['id'] for s in sources})
+    local_ids = {s['id'] for s in local}
+    if (automatic and not rebuild and hints and not hints.discovery_due()
+            and hints.pending() and all(sid in local_ids for sid, _ in hints.pending())):
+        Scan(store, local, report, progress, cancel, False, True).run_pending()
+        return {**report, 'cancelled': True} if cancel and cancel.is_set() else report
+    if hints:
+        hints.begin_discovery()
+    scan = Scan(store, local, report, progress, cancel, rebuild, automatic)
+    for failure in scan.failures.values():
+        failure.parser_version = PARSER_VERSION
+    scan.run()
+    if cancel and cancel.is_set():
+        return {**report, 'cancelled': True}
+    from .claude_recovery import recover
+    live = Scan(store, local, report, cancel=cancel, automatic=True)
+    def recovery_progress(value):
+        # This phase runs outside the recovery publication transaction.
+        if value.get('phase') == 'Recovering Claude history':
+            live.hints()
+            if time.monotonic() - live.last_inventory >= 30:
+                live.inventory()
+            deadline = time.monotonic() + .25
+            while live.tasks and time.monotonic() < deadline and not live.cancelled():
+                live.step()
+            live.finalize(deadline)
+        if progress:
+            progress(value)
+    try:
+        recovering_sources = recover(store, recovery_progress, cancel, report)
+    except InterruptedError:
+        return {**report, 'cancelled': True}
+    finally:
+        live.close()
+    remaining = []
     for source in sources:
-        if not source["root"]:
+        if source['provider'] == 'codex':
             continue
-        root = Path(source["root"])
+        if source['id'] in recovering_sources:
+            if not Path(source['root']).is_dir():
+                with store.connect() as db:
+                    db.execute("UPDATE sources SET status='Offline',detail='Previously indexed history retained; Claude identity verification resumes when reconnected' WHERE id=?", (source['id'],))
+            continue
         if source.get('format') == 'antigravity_legacy':
             with store.connect() as db:
                 db.execute("UPDATE sources SET status='Collection disabled',detail='Encrypted archive collection is retired. Previously indexed history is retained; use public transcripts and official hooks.' WHERE id=?", (source['id'],))
             continue
-        provider_adapter = adapter(source.get("provider", "codex"))
-        parser_version = PARSER_VERSION if provider_adapter.provider == 'codex' else provider_adapter.version
-        if not root.is_dir():
-            with store.connect() as db:
-                db.execute("UPDATE sources SET status='Offline',detail='Previously indexed history retained' WHERE id=?", (source["id"],))
-            continue
-        with store.connect() as db:
-            checkpoints = {row['path']:dict(row) for row in db.execute('SELECT path,offset,mtime,size,anchor,parser_version FROM files WHERE source_id=?',(source['id'],))}
-        failures = FileFailures(store, source["id"], parser_version)
-        discovered_files = 0
-        try:
-            for path in provider_adapter.discover(root, source["kind"]):
-                discovered_files += 1
-                if cancel and cancel.is_set():
-                    flush_changes()
-                    failures.summarize()
-                    return {**report, "cancelled": True}
-                report["files"] += 1
-                if progress:
-                    progress({**report, "source": source["label"]})
-                stat, parser = None, None
-                try:
-                    stat = path.stat()
-                    if failures.skip(path, stat, automatic and not rebuild):
-                        report["skipped_errors"] += 1
-                        continue
-                    cached = checkpoints.get(str(path))
-                    current = cached and cached["parser_version"] == parser_version
-                    # A stable incomplete final line cannot become complete
-                    # until the file changes. Avoid re-packing its entire
-                    # checkpoint on every fallback scan while it is idle.
-                    if (current and not rebuild and str(path) not in failures.failed
-                            and cached["size"] == stat.st_size and cached["mtime"] == stat.st_mtime_ns):
-                        continue
-                    state = None
-                    if current and not rebuild:
-                        with store.connect() as db:
-                            saved=db.execute('SELECT state FROM files WHERE source_id=? AND path=?',(source['id'],str(path))).fetchone()
-                        state=unpack(saved[0]) if saved else None
-                    if state and (state.get("version") != parser_version or stat.st_size < cached["offset"] or anchor(path, cached["offset"]) != cached["anchor"] or (stat.st_size == cached["size"] and stat.st_mtime_ns != cached["mtime"])):
-                        state = None
-                    from .providers.antigravity import read_metadata
-                    metadata = read_metadata(store.directory, path) if provider_adapter.provider == 'antigravity' else None
-                    parser = provider_adapter.parser(state, path, source["kind"], metadata=metadata)
-                    start_offset = parser.state["offset"]
-                    with path.open("rb") as stream:
-                        stream.seek(start_offset)
-                        while not cancel or not cancel.is_set():
-                            line = stream.readline()
-                            if not line or not line.endswith(b"\n"):
-                                break
-                            parser.consume(line, stream.tell())
-                    if provider_adapter.provider == 'antigravity' and (path.stat().st_size != stat.st_size or path.stat().st_mtime_ns != stat.st_mtime_ns):
-                        raise ValueError('Public transcript changed while reading; retrying on the next refresh')
-                    if cancel and cancel.is_set():
-                        flush_changes()
-                        failures.summarize()
-                        return {**report, "cancelled": True}
-                    offset = parser.state["offset"]
-                    fact = parser.fact()
-                    with store.lock, store.connect() as db:
-                        db.execute("INSERT OR REPLACE INTO files(source_id,path,offset,mtime,size,anchor,state,parser_version) VALUES(?,?,?,?,?,?,?,?)", (source["id"], str(path), offset, stat.st_mtime_ns, stat.st_size, anchor(path, offset), pack(parser.checkpoint()), parser_version))
-                        if fact:
-                            fact = portable_fact(fact)
-                            store.put_candidate(db, source["id"], fact, parser_version)
-                            if store.choose_canonical(db, fact["segment_id"]):
-                                db.execute("INSERT OR IGNORE INTO projection_queue VALUES(?)", (fact["segment_id"],))
-                    report["bytes_read"] += offset - start_offset
-                    report["changed_files"] += 1
-                    failures.clear(path)
-                except (OSError, ValueError, TypeError, KeyError) as exc:
-                    report["errors"] += 1
-                    failures.record(path, stat, exc, parser.state.get("offset") if parser else None)
-                    continue
-                if report["changed_files"] % 25 == 0:
-                    flush_changes()
-            flush_changes()
-            failures.summarize(complete=True)
-            from .providers.history_status import missing_history
-            missing = missing_history(provider_adapter.provider, source["kind"], discovered_files)
-            with store.lock, store.connect() as db:
-                if missing:
-                    db.execute("UPDATE sources SET status=?,detail=?,updated=? WHERE id=?", (
-                        missing["status"], missing["detail"], datetime.now(timezone.utc).isoformat(), source["id"]))
-                else:
-                    db.execute("UPDATE sources SET status='Ready',updated=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), source["id"]))
-        except OSError:
-            report["errors"] += 1
-    return report
+        remaining.append(source)
+    Scan(store, remaining, report, progress, cancel, rebuild, automatic, live_sources=local).run()
+    return {**report, 'cancelled': True} if cancel and cancel.is_set() else report
 
 
 def register_defaults(store):

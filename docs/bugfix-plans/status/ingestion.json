@@ -1,6 +1,9 @@
 {
   "owner": "ingestion",
-  "bug_ids": ["B1", "B6"],
+  "bug_ids": [
+    "B1",
+    "B6"
+  ],
   "outcome": "implemented_and_focused_tests_passed",
   "changed_files": [
     "src/codex_insights/storage.py",
@@ -46,5 +49,5 @@
     "Implement the separately assigned replay-accounting projection upgrade for existing local/imported facts; the parser bump alone cannot reproject imported snapshots.",
     "Document one-time local reparse, offline recovery, and persistent conflict warnings in the shared repair documentation. No transfer-format or projection code change is required by these ingestion fixes."
   ],
-  "safety": "Only synthetic session fixtures and isolated databases under unique .local-data test directories were used. No original session logs, real credentials, commits, releases, or unrelated-owner files were modified. Optional notify_andy tools were not available."
+  "safety": "Only synthetic session fixtures and isolated databases under unique .local-data test directories were used. No original session logs, real credentials, commits, releases, or unrelated-owner files were modified."
 }

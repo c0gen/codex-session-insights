@@ -12,7 +12,7 @@ def catalog():
             "models": json.loads(json.dumps(pricing.MODEL_RATE_RECORDS, default=lambda x:x.isoformat()))}
 
 
-def apply_catalog(value):
+def parse_catalog(value):
     if not isinstance(value, dict) or value.get("version") != 1 or not isinstance(value.get("models"), dict):
         raise ValueError("Unsupported pricing catalog")
     result = {}
@@ -37,6 +37,11 @@ def apply_catalog(value):
             check_rates(rates)
             parsed.append(item)
         result[model] = parsed
+    return result
+
+
+def apply_catalog(value):
+    result = parse_catalog(value)
     pricing.MODEL_RATE_RECORDS.clear()
     pricing.MODEL_RATE_RECORDS.update(result)
 

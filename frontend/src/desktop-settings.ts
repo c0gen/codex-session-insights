@@ -110,8 +110,8 @@ export function syncDesktopSettings(state: DesktopState, limits?: UsageLimits) {
 
 let handledSettingsRequest = 0;
 let handledAccountRequest = 0;
-export async function pollDesktopSettings(open: () => void, openAccount?: (id: string) => void) {
-  const state = await call<DesktopState>("desktop_state");
+export async function pollDesktopSettings(open: () => void, openAccount?: (id: string) => void, supplied?: DesktopState) {
+  const state = supplied ?? await call<DesktopState>("desktop_state");
   syncDesktopSettings(state);
   if ((state.settings_request || 0) > handledSettingsRequest) {
     handledSettingsRequest = state.settings_request!;

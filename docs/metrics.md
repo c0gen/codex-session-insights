@@ -40,15 +40,19 @@ Pricing coverage is priced tokens divided by all tokens in the window. Partial c
 
 ## Cache, reasoning and daily sessions
 
-**Usage & Cost** contains three cards and a **Chats and agents per day** chart. They follow the applied date, project, model and canonical source filters in the display timezone. They use analyzed local/imported facts, independently of account lifetime totals and local token burn. Standalone HTML reports retain the same values and chart without network access.
+**Usage & Cost** contains three cards, **Cache reuse rate over time**, and **Chats and agents per day**. They follow the applied date, provider, project, model and canonical source filters in the display timezone. They use analyzed local/imported facts, independently of account lifetime totals and local token burn. Standalone HTML reports retain the same values and charts without network access.
 
 | Metric | Formula and interpretation |
 | --- | --- |
 | Cache reuse rate | `100 × sum(cached read tokens) / sum(input tokens)`. Input already includes cached reads and writes. |
-| Reasoning share | `100 × sum(reasoning tokens) / sum(output tokens)`. Output already includes reasoning. |
+| Reasoning share | `100 × sum(reasoning tokens) / sum(output tokens)` using only responses recording both counters. Output already includes reasoning. |
 | Estimated cache discount | Sum `cached read tokens × (uncached-input rate − cached-input rate) / 1,000,000` for reconciled priced responses, without per-response rounding. |
 
 Ratios use aggregate counters, not averages of response percentages. A positive denominator and zero numerator give 0%; a zero denominator or a subset larger than its denominator gives Unavailable. Original counters remain intact.
+
+**Cache reuse rate over time** defaults to daily percentages and offers Monday–Sunday weekly buckets clipped to the applied dates. Weekly percentages use summed tokens; for example, 100 cached reads out of 100 input followed by 0 out of 900 gives 10%. No recorded usage, zero input, incomplete input/cache counters and invalid daily ratios leave gaps rather than plotted zeroes. A week containing incomplete counters or an invalid daily ratio is unavailable. Hover or expand **Exact values and coverage** for counts and gap explanations. The fixed 0–100% chart pages through 90 periods at a time, starting with the latest page. Its mode and current page survive navigation and automatic refresh; changing filters or mode returns to the latest page. Older snapshots without the new history field display an unavailable message.
+
+**Reasoning share** labels partial coverage as **Recorded subset · N of M responses** and exposes the matching reasoning/output totals in its help text. Output from responses lacking reasoning counters cannot dilute the percentage, and unreported reasoning cannot become an observed zero. If no responses record both counters, no eligible output exists, or the aggregate subset is invalid, the card explains why it is unavailable. Complete coverage retains the original formula. These queries use existing indexed facts without a schema migration or log rescan.
 
 The discount uses the exact effective model/date, service tier, request-context threshold and assumed-Fast rates selected by cost accounting. The comparison holds input volume, output and cache-write charges unchanged. It is an API-equivalent estimate, not subscription savings. Signed differences are preserved: a negative value is an estimated surcharge. Tiny amounts remain visible, and the tooltip exposes the unrounded value.
 

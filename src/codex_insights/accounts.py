@@ -41,7 +41,20 @@ class Accounts:
 
     def current_allowance(self):
         with self.lock:
-            return self.monitors["current"].read()["allowance"]
+            monitor = self.monitors['current']
+            with monitor.history.lock, monitor.limits.lock:
+                return monitor.limits.read()
+
+    def token_total(self):
+        """Only summary counters are needed by the Overview's live status."""
+        with self.lock:
+            totals = []
+            for identifier, entry in self.entries.items():
+                history = self.monitors[identifier].history
+                with history.lock:
+                    totals.append({**entry, 'removing': identifier in self.removing,
+                                   'identity': history.account, 'history': history.read(('summary',))})
+            return account_token_total(totals, self.enabled, self.allowed)
 
     def refresh_current(self):
         with self.lock:

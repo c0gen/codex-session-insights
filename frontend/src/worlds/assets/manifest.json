@@ -1,0 +1,644 @@
+{
+  "version": 1,
+  "project": "token-worlds",
+  "sourceSha256": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02",
+  "assets": [
+    {
+      "id": "person",
+      "file": "person.glb",
+      "sizeM": [
+        0.7029373645782471,
+        1.75,
+        0.29999999701976776
+      ],
+      "boundsM": [
+        [
+          -0.35146868228912354,
+          0.0,
+          -0.13999998569488525
+        ],
+        [
+          0.35146868228912354,
+          1.75,
+          0.1600000113248825
+        ]
+      ],
+      "triangles": 296,
+      "sha256": "dc596d5cd06a02f8a602cd790f7833eedebbe80a998e0607567fa4b95ba5eff0",
+      "bytes": 23244,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          1.75,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "2d28bb89b24256079a639f614371f495",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "house",
+      "file": "house.glb",
+      "sizeM": [
+        9.0,
+        10.0,
+        7.0
+      ],
+      "boundsM": [
+        [
+          -4.5,
+          0.0,
+          -3.5
+        ],
+        [
+          4.5,
+          10.0,
+          3.5
+        ]
+      ],
+      "triangles": 80,
+      "sha256": "474a353205a6862144b7bd06622b00ed623498cf43982fa466ee557748a9d5b5",
+      "bytes": 9328,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          10.0,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "473625941062f1f4a6192b6a79b72f64",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "eiffel",
+      "file": "eiffel.glb",
+      "sizeM": [
+        129.7952423095703,
+        330.0,
+        129.79524993896484
+      ],
+      "boundsM": [
+        [
+          -64.89762115478516,
+          0.0,
+          -64.89762115478516
+        ],
+        [
+          64.89762115478516,
+          330.0,
+          64.89762878417969
+        ]
+      ],
+      "triangles": 1096,
+      "sha256": "2fe5a5cfe9d3c5f8fc07629e68d3ed1a864f8c4b72d5726bda771b674b3261e8",
+      "bytes": 78044,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          330.0,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "709021bac1583444a0f2be6607b36599",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "burj",
+      "file": "burj.glb",
+      "sizeM": [
+        82.36499786376953,
+        828.0,
+        95.10690307617188
+      ],
+      "boundsM": [
+        [
+          -40.964996337890625,
+          0.0,
+          -47.55345153808594
+        ],
+        [
+          41.400001525878906,
+          828.0,
+          47.55345153808594
+        ]
+      ],
+      "triangles": 1824,
+      "sha256": "4317840e5687aab5efabc95fff25b671a8b94fab89550211ce9c0ee7a26081e4",
+      "bytes": 114588,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          828.0,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "c0479b55a07345f11e82649dce233f8c",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "everest",
+      "file": "everest.glb",
+      "sizeM": [
+        12388.92724609375,
+        8848.8603515625,
+        12275.7314453125
+      ],
+      "boundsM": [
+        [
+          -6232.466796875,
+          0.0,
+          -6011.8916015625
+        ],
+        [
+          6156.46044921875,
+          8848.8603515625,
+          6263.83984375
+        ]
+      ],
+      "triangles": 142,
+      "sha256": "d53dc0d5655a6bba360498e60995fb4944af506be19bead2ede45c29da36224b",
+      "bytes": 11776,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          8848.8603515625,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "305bd4b5d271d0abb77ed739cc035574",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "book-blue",
+      "file": "book-blue.glb",
+      "sizeM": [
+        0.032999999821186066,
+        0.2199999988079071,
+        0.15150000154972076
+      ],
+      "boundsM": [
+        [
+          -0.016499999910593033,
+          0.0,
+          -0.07649999856948853
+        ],
+        [
+          0.016499999910593033,
+          0.2199999988079071,
+          0.07500000298023224
+        ]
+      ],
+      "triangles": 72,
+      "sha256": "9f237672f6323141513a04c506d7293d55bef37ebe2ce92115645575fe1a42a9",
+      "bytes": 8260,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          0.2199999988079071,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "54af8c0b664abcfd9f9985413254e4d2",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "book-red",
+      "file": "book-red.glb",
+      "sizeM": [
+        0.032999999821186066,
+        0.2199999988079071,
+        0.15150000154972076
+      ],
+      "boundsM": [
+        [
+          -0.016499999910593033,
+          0.0,
+          -0.07649999856948853
+        ],
+        [
+          0.016499999910593033,
+          0.2199999988079071,
+          0.07500000298023224
+        ]
+      ],
+      "triangles": 72,
+      "sha256": "06d9606958e9c894d0cf0f41d09abdfa6b74677580100daf106e2d0539a9181c",
+      "bytes": 8260,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          0.2199999988079071,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "74140c7504714a2e7d19037605080b78",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "book-green",
+      "file": "book-green.glb",
+      "sizeM": [
+        0.032999999821186066,
+        0.2199999988079071,
+        0.15150000154972076
+      ],
+      "boundsM": [
+        [
+          -0.016499999910593033,
+          0.0,
+          -0.07649999856948853
+        ],
+        [
+          0.016499999910593033,
+          0.2199999988079071,
+          0.07500000298023224
+        ]
+      ],
+      "triangles": 72,
+      "sha256": "b8d1281139f4f0f2210f84d52c7947c92f72bca7464dbd4522155a866e972bb5",
+      "bytes": 8260,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          0.2199999988079071,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "601d53917015202f7f219ca3210464c3",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "shelf",
+      "file": "shelf.glb",
+      "sizeM": [
+        1.3199999332427979,
+        1.7999999523162842,
+        0.289000004529953
+      ],
+      "boundsM": [
+        [
+          -0.6599999666213989,
+          0.0,
+          -0.14900000393390656
+        ],
+        [
+          0.6599999666213989,
+          1.7999999523162842,
+          0.14000000059604645
+        ]
+      ],
+      "triangles": 108,
+      "sha256": "4fc059c45e8a07f25e4f12f93da66f9b1a0390f8d30a1ed1b772cc55d52a9424",
+      "bytes": 8892,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          1.7999999523162842,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "2e42e4b0be7e79ee2e4faf20a615a265",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "desk",
+      "file": "desk.glb",
+      "sizeM": [
+        1.300000011920929,
+        0.7899999618530273,
+        0.6499999761581421
+      ],
+      "boundsM": [
+        [
+          -0.6499999761581421,
+          0.0,
+          -0.32499998807907104
+        ],
+        [
+          0.6500000357627869,
+          0.7899999618530273,
+          0.32499998807907104
+        ]
+      ],
+      "triangles": 60,
+      "sha256": "90ce3bcbc4ef0794322b06d1f1a1da28a0e353d8383463032721441770e02ecf",
+      "bytes": 6464,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          0.7899999618530273,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "740b487d09d84b1be81648580989b404",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "chair",
+      "file": "chair.glb",
+      "sizeM": [
+        0.44999998807907104,
+        0.9149999618530273,
+        0.45749999582767487
+      ],
+      "boundsM": [
+        [
+          -0.22499999403953552,
+          0.0,
+          -0.23249998688697815
+        ],
+        [
+          0.22499999403953552,
+          0.9149999618530273,
+          0.22500000894069672
+        ]
+      ],
+      "triangles": 72,
+      "sha256": "41fd947fb69b495ba118ebe33b3dc5da741ed6f7492e61f3180618ab1992ead6",
+      "bytes": 7312,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          0.9149999618530273,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "3f298868b05b795ded9d6fc2c05f138e",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "bay",
+      "file": "bay.glb",
+      "sizeM": [
+        3.119999885559082,
+        2.859999895095825,
+        0.15000000596046448
+      ],
+      "boundsM": [
+        [
+          -1.559999942779541,
+          0.0,
+          -0.07500000298023224
+        ],
+        [
+          1.559999942779541,
+          2.859999895095825,
+          0.07500000298023224
+        ]
+      ],
+      "triangles": 36,
+      "sha256": "579fd44413f01fcd49f7ee2c4ae5b121cd9b0cf8ce057248b4505a3f6b150492",
+      "bytes": 3844,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          2.859999895095825,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "03576bbb31913d759f9fa7770469b91d",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "floppy",
+      "file": "floppy.glb",
+      "sizeM": [
+        0.09000000357627869,
+        0.09399999678134918,
+        0.004249999998137355
+      ],
+      "boundsM": [
+        [
+          -0.04500000178813934,
+          0.0,
+          -0.0016499999910593033
+        ],
+        [
+          0.04500000178813934,
+          0.09399999678134918,
+          0.0026000000070780516
+        ]
+      ],
+      "triangles": 48,
+      "sha256": "b20816b252edf34cf781310b8f77f4873145b529d8d00b93f40cc7ff2152f768",
+      "bytes": 6924,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          0.09399999678134918,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "d7acd4ea5e6039de60420938eff2619a",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    },
+    {
+      "id": "storage-box",
+      "file": "storage-box.glb",
+      "sizeM": [
+        0.27000001072883606,
+        0.17500001192092896,
+        0.23000000417232513
+      ],
+      "boundsM": [
+        [
+          -0.13500000536441803,
+          0.0,
+          -0.11500000208616257
+        ],
+        [
+          0.13500000536441803,
+          0.17500001192092896,
+          0.11500000208616257
+        ]
+      ],
+      "triangles": 36,
+      "sha256": "b9c2f25280be10e09b1e6e84454535b1979473e3cf0d6b9da1acf57c2cddca9a",
+      "bytes": 5304,
+      "units": "m",
+      "up": "+Y",
+      "origin": "ground-centre",
+      "anchors": {
+        "ground": [
+          0,
+          0,
+          0
+        ],
+        "top": [
+          0,
+          0.17500001192092896,
+          0
+        ]
+      },
+      "source": "source/build.py",
+      "revision": "4",
+      "license": "Original scripted geometry; project asset",
+      "artifactId": "adeed6fdf2e43a4ec67286a09149908d",
+      "sourceRevision": "d5a15375a5eb77b522a8df28dffb198230dcca0325c633447a84f61af7dc0e02"
+    }
+  ],
+  "provenance": {
+    "authoringProject": "token-worlds",
+    "buildJob": "30ab5c84da11480c941ade95a279c499",
+    "validationJob": "30ab5c84da11480c941ade95a279c499",
+    "validationArtifact": "1a06b951eeca8c8967e832aec9540b7a",
+    "validationSha256": "edc2f6076598d947312b034177911bcd71e9bd303b8c37d3debd44d8d1f0d9af",
+    "bundleJob": "ff52f026c401474c9b7d516b496df284",
+    "bundleSha256": "99c47a52d6a8c33eabdee64f6508945ef97aa9ce19b20791dac9d3751d9ed7c5",
+    "review": {
+      "reviewer": "Codex",
+      "date": "2026-10-20",
+      "verdict": "accepted",
+      "views": [
+        "d4d9e3a49e7d5bf96b90c86fb647f4d6",
+        "14780770200d376ffa982650d0eb9da8",
+        "6eac34e8d22755a1c7d570a345132af7",
+        "10cd07c6e428f7ee11c670e2f6e89cde",
+        "c7b0fd50ab07290fc374fa26e95ba0fd"
+      ]
+    }
+  }
+}

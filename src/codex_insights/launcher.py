@@ -49,8 +49,25 @@ def show_startup_error(error, log_path):
 
 def launch(argv=None, default_command="gui"):
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if '--sqlite-runtime-result' in arguments:
+        import json
+        from .sqlite_runtime import diagnostic
+        destination = Path(arguments[arguments.index('--sqlite-runtime-result') + 1])
+        value = diagnostic()
+        destination.write_text(json.dumps(value), encoding='utf-8')
+        return 0 if value['supported'] else 1
     if not arguments and default_command != "gui":
         arguments = [default_command]
+    if 'diagnose-history' in arguments:
+        # Audit an existing index before upgrades, without even creating the
+        # normal startup log in its data directory.
+        from .cli import main
+        try:
+            return main(arguments)
+        except Exception as error:
+            if sys.stderr:
+                print(str(error), file=sys.stderr)
+            return 1
     log_path, stream = open_startup_log(log_directory(arguments))
     handler = logging.StreamHandler(stream) if stream else logging.NullHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
@@ -75,7 +92,7 @@ def launch(argv=None, default_command="gui"):
         logging.exception("App startup or command failed")
         if sys.stderr:
             print(str(error), file=sys.stderr)
-        headless = {"scan", "export", "import", "report", "catalog", "serve", "diagnose-antigravity-legacy"}
+        headless = {"scan", "export", "import", "report", "catalog", "serve", "diagnose-antigravity-legacy", 'diagnose-history'}
         automated = "--smoke-result" in arguments or os.environ.get("CODEX_INSIGHTS_SMOKE_RESULT")
         if not any(arg in headless for arg in arguments) and not automated and "--diagnose" not in arguments:
             show_startup_error(error, log_path)

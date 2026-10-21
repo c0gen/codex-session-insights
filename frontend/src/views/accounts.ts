@@ -89,7 +89,7 @@ export class AccountsView {
       }, true);
     }
     this.render();
-    if (!blocked) void this.poll();
+    if (!blocked && this.root && !this.value) void this.poll();
   }
 
   private card(group: AccountGroup<AccountSnapshot>): string {
@@ -125,10 +125,12 @@ export class AccountsView {
     const localRate = this.root.querySelector<HTMLElement>("#accounts-token-burn")!;
     const rateMarkup = localBurnRatesMarkup(value, ["accounts"]);
     if (localRate.dataset.markup !== rateMarkup) {
+      const focusedId = localRate.contains(document.activeElement) ? (document.activeElement as HTMLElement).id : "";
       const focusedRate = Array.from(localRate.querySelectorAll(".burn-rate")).indexOf(document.activeElement!);
       localRate.innerHTML = rateMarkup;
       localRate.dataset.markup = rateMarkup;
       if (focusedRate >= 0) localRate.querySelectorAll<HTMLElement>(".burn-rate")[focusedRate]?.focus({ preventScroll: true });
+      if (focusedId) localRate.querySelector<HTMLElement>(`#${CSS.escape(focusedId)}`)?.focus({ preventScroll: true });
     }
     const add = this.root.querySelector<HTMLButtonElement>("#account-add")!;
     add.disabled = this.working || !value.allowed || !value.enabled || pendingLogin(value);
@@ -262,5 +264,11 @@ export class AccountsView {
       this.render();
       if (!this.connectionError) this.focusRequestedAccount();
     }
+  }
+  accept(value: AccountsSnapshot) {
+    this.value = value;
+    this.connectionError = '';
+    this.render();
+    this.focusRequestedAccount();
   }
 }

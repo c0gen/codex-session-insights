@@ -1,6 +1,8 @@
 {
   "owner": "account-identity",
-  "bugs": ["B3"],
+  "bugs": [
+    "B3"
+  ],
   "outcome": "Scoped implementation and new regressions complete; legacy fixture and shared type updates handed to integration.",
   "contract": {
     "identity": "AccountIdentity carries a private hashed lifecycle marker and a separate confirmed accountId hash. Only explicit confirmed identity can deduplicate. Email, nullable metadata, and legacy opaque lifecycle strings never prove identity.",
@@ -51,7 +53,6 @@
   ],
   "notes": [
     "No original logs, actual credentials, shared account-monitor/type files, releases, commits, or external messages were modified or sent.",
-    "Optional notify_andy tools were not available in the tool catalog.",
     "An initial Vite SSR test hit a Windows realpath permission error. Rendering checks were subsequently run successfully with an in-memory esbuild bundle in the permanent regression script."
   ]
 }

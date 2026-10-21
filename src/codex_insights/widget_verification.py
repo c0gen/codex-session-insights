@@ -90,7 +90,12 @@ def verify_widget(controller, widget, ui, wait_for, result):
         wait_for(fits)
     widget.evaluate_js("window.pywebview.api.call = window.__originalWidgetCall")
     refresh()
-    wait_for(lambda: widget.evaluate_js("document.querySelector('#widget-indicator').hidden"))
+    try:
+        wait_for(lambda: widget.evaluate_js("document.querySelector('#widget-indicator').hidden"))
+    except AssertionError:
+        result['widget_restore_diagnostic'] = widget.evaluate_js("({hidden:document.hidden,indicator:document.querySelector('#widget-indicator').title})")
+        result['widget_restore_job'] = controller.engine.jobs.snapshot()
+        raise
     wait_for(fits)
     result['checks'].append('all 16 metric combinations, large totals, unpriced/partial costs and disconnection fit without clipping')
 

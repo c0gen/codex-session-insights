@@ -19,20 +19,22 @@ Projection version 2 adds nullable cache facts to records and buckets and rebuil
 
 Deferred GUI maintenance and the previous no-window startup fix remain intact. Automated tests verify dashboard availability during a blocked maintenance job and correct results after it completes. All new query fields share the dashboard's read transaction, filters, timezone and revision, including a test that writes concurrently during the query. Public metric objects contain only aggregate values and day/count rows; report tests verify no added transcript or path fields. Existing account totals, local token burn, widget, summary-image, replay and malformed-file regressions pass.
 
-## Exact validation
+## Validation
 
-Commands ran from `desktop-app`; browser commands used `PLAYWRIGHT_CHANNEL=msedge`. All artifacts and test indexes used the unique `.local-data/metric-integration-01a128fd-*` prefix.
+Scratch directory names below are anonymized; the recorded test results are unchanged.
 
-- `PYTHONPATH=src .venv/Scripts/python.exe -m pytest -q --basetemp=.local-data/metric-integration-01a128fd-pytest` — **288 passed in 61.19s**. Includes [cache/pricing/migration tests](../../../tests/test_usage_metrics.py), [daily-session tests](../../../tests/test_daily_sessions.py), [startup/projection tests](../../../tests/test_projection_upgrade.py), and all existing Python regressions.
+Commands ran from `desktop-app`; browser commands used `PLAYWRIGHT_CHANNEL=msedge`. All artifacts and test indexes used the unique `.local-data/metric-integration-run-*` prefix.
+
+- `PYTHONPATH=src .venv/Scripts/python.exe -m pytest -q --basetemp=.local-data/metric-integration-run-pytest` — **288 passed in 61.19s**. Includes [cache/pricing/migration tests](../../../tests/test_usage_metrics.py), [daily-session tests](../../../tests/test_daily_sessions.py), [startup/projection tests](../../../tests/test_projection_upgrade.py), and all existing Python regressions.
 - `npm run build` in `frontend` — TypeScript, dashboard production build and widget production build passed. Initial sandbox Vite `realpath` EPERM was resolved by an approved local elevated retry.
-- `node scripts/qa_metric_interface.mjs .local-data/metric-integration-01a128fd-browser` — passed focused data checks and built-interface browser checks: all card states, exact counts, date gaps/DST, keyboard paging, filters/drafts, refreshes, repeated navigation, narrow layout, real exporter and offline rendering without network.
+- `node scripts/qa_metric_interface.mjs .local-data/metric-integration-run-browser` — passed focused data checks and built-interface browser checks: all card states, exact counts, date gaps/DST, keyboard paging, filters/drafts, refreshes, repeated navigation, narrow layout, real exporter and offline rendering without network.
 - `node scripts/qa_token_activity_data.mjs`, `node scripts/qa_filter_state_unit.mjs`, and `node scripts/qa_account_identity.mjs` — passed.
-- Isolated production demo server: `.venv/Scripts/python.exe -m codex_insights --demo --data-dir .local-data/metric-integration-01a128fd-server serve --port 48763`.
-- Real demo report: `.venv/Scripts/python.exe -m codex_insights --demo --data-dir .local-data/metric-integration-01a128fd-report report --output .local-data/metric-integration-01a128fd-browser/demo-report.html` — passed.
+- Isolated production demo server: `.venv/Scripts/python.exe -m codex_insights --demo --data-dir .local-data/metric-integration-run-server serve --port 48763`.
+- Real demo report: `.venv/Scripts/python.exe -m codex_insights --demo --data-dir .local-data/metric-integration-run-report report --output .local-data/metric-integration-run-browser/demo-report.html` — passed.
 - Against `http://127.0.0.1:48763`: `qa_ui.mjs` (with the demo report and a scratch screenshot path), `qa_filter_state.mjs`, `qa_token_kpi.mjs`, `qa_summary_images.mjs`, `qa_accounts.mjs`, `qa_widget.mjs` (with the report), `qa_token_activity.mjs` (with the report), and `qa_live_updates.mjs` — passed. Outputs are under the browser artifact directory above.
-- Independent Python stdin acceptance generated synthetic main/copied/child/system logs under `.local-data/metric-integration-01a128fd-acceptance`, asserted exact formulas/counts, and exported `report.html` plus `expected.json`. An independent Edge stdin check verified actual API/card parity and that report's $1.08/60%/25% cards and three exact daily rows with zero network. Screenshot: `report.png` in that directory.
+- Independent Python stdin acceptance generated synthetic main/copied/child/system logs under `.local-data/metric-integration-run-acceptance`, asserted exact formulas/counts, and exported `report.html` plus `expected.json`. An independent Edge stdin check verified actual API/card parity and that report's $1.08/60%/25% cards and three exact daily rows with zero network. Screenshot: `report.png` in that directory.
 - Relevant `git diff --check` — passed; only existing CRLF normalization notices.
-- `node scripts/qa_merges_allowance.mjs http://127.0.0.1:48763 .local-data/metric-integration-01a128fd-browser/merges` — passed bulk/single merge, undo, selection and scroll retention, queued feedback, cached allowance states and widget layout.
+- `node scripts/qa_merges_allowance.mjs http://127.0.0.1:48763 .local-data/metric-integration-run-browser/merges` — passed bulk/single merge, undo, selection and scroll retention, queued feedback, cached allowance states and widget layout.
 
 The live-update QA initially failed on a transient detached layout read and then on its stale mocked response filters. Integration corrected the fixture to echo applied request filters and custom bounds, and used retrying layout assertions. The full script then passed. No application repair was necessary for these failures.
 
@@ -50,4 +52,3 @@ The isolated demo server was stopped after acceptance, and its port was checked 
 - During deferred projection maintenance, cached summary values remain visible and daily sessions are an empty array until version 2 commits; users should wait for Updating usage index to finish before interpreting daily counts. Discount coverage stays conservative during that interval.
 - Missing activity/model facts cannot be reconstructed. Older portable histories recover models from available event facts, otherwise activity remains Unknown. Source filters intentionally follow canonical winners rather than every physical copy.
 - Estimates use the configured dated catalog, with no live price refresh, subscription-savings claim, or real account access.
-- Optional `notify_andy` tools were absent from the available inventory; no external completion alert could be sent.

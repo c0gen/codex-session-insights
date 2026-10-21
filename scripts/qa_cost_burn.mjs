@@ -24,6 +24,10 @@ const desktop = { available: true, preferences: { tray_enabled: true, widget_ena
 
 await context.route('**/api/*', async route => {
   const action = route.request().url().split('/').pop();
+  if (action === 'live_status') {
+    const response = await route.fetch(), value = await response.json();
+    return route.fulfill({json: {...value, ready: true, accounts, usage_limits: limits(), desktop}});
+  }
   if (action === 'accounts') return route.fulfill({ json: accounts });
   if (action === 'usage_limits') return route.fulfill({ json: limits() });
   if (action === 'desktop_state') return route.fulfill({ json: desktop });
@@ -80,6 +84,34 @@ try {
   accounts.cost_burn_rate = rate(null, { status: 'collecting', observed_seconds: 0 });
   await page.waitForFunction(() => document.querySelector('#accounts-token-burn .burn-rate-cost')?.textContent.includes('Waiting for indexing'));
 
+  const coverage = { state: 'partial', checked_at: now, reasons: [
+    { code: 'file_error', label: 'File unreadable', count: 1, source_id: 'local', retry_at: now + 30 },
+  ] };
+  accounts.token_burn_rate = rate(12400, { partial: true, coverage });
+  accounts.cost_burn_rate = cost(.53, { partial: true, coverage });
+  await page.waitForFunction(() => document.querySelector('#accounts-token-burn')?.textContent.includes('File unreadable'));
+  const coverageButton = accountRate.locator('[data-burn-sources]');
+  await coverageButton.focus();
+  accounts.cost_burn_rate = cost(.54, { partial: true, coverage });
+  await page.waitForFunction(() => document.querySelector('#accounts-token-burn .burn-rate-cost')?.textContent.includes('$0.54/min'));
+  assert.equal(await coverageButton.evaluate(node => document.activeElement === node), true);
+  await coverageButton.click();
+  await page.locator('#add-source').waitFor();
+  await page.locator('[data-page=overview]').click();
+  await dashboardRate.waitFor();
+  await page.waitForFunction(() => document.querySelector('#limits-burn-cost')?.textContent.includes('File unreadable'));
+  assert.match(await dashboardRate.innerText(), /Partial.*File unreadable/s);
+  const compactCoverage = dashboardRate.locator('[data-burn-sources]');
+  await compactCoverage.focus();
+  accounts.cost_burn_rate = cost(.55, { partial: true, coverage });
+  await page.waitForFunction(() => document.querySelector('#limits-burn-cost')?.textContent.includes('$0.55/min'));
+  assert.equal(await compactCoverage.evaluate(node => document.activeElement === node), true);
+  await page.setViewportSize({ width: 390, height: 800 });
+  assert.equal(await dashboardRate.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+  await page.locator('#limits-row').screenshot({ path: resolve(output, 'dashboard-coverage-reasons.png') });
+  await page.locator('[data-page=accounts]').click();
+  await accountRate.waitFor();
+  accounts.token_burn_rate = rate(12400);
   accounts.cost_burn_rate = cost(.53);
   await page.setViewportSize({ width: 390, height: 800 });
   await page.waitForFunction(() => document.querySelector('#accounts-token-burn .burn-rate-cost')?.textContent.includes('$0.53/min'));

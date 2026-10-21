@@ -30,6 +30,9 @@ try {
     if (action === 'provider_allowances') value = [];
     if (action === 'status') value = {...fixture.job, revision: fixture.revision};
     if (action === 'export_html') { exports.push(args); value = {status:'cancelled'}; }
+    if (action === 'live_status') value = {ready: true, job: {...fixture.job, revision: fixture.revision}, desktop: {available: false},
+      provider_allowances: [], account_token_total: total,
+      usage_limits: {allowed: false, enabled: false, buckets: [], status: 'disabled', stale: false, refreshing: false, last_success_at: null}};
     await route.fulfill({json:value});
   });
   await page.goto(server.url);

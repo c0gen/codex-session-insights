@@ -4,7 +4,9 @@ Implement estimated cache discount, cache reuse rate, reasoning share, and daily
 
 The backend and interface owners work in parallel on separate files. The integration owner verifies the complete feature after both finish. All three chats use GPT-6 Astra with Medium reasoning.
 
-The prior bug-fix integration chat (01a128d4-64aa-7310-a18d-f075337956f7) has completed. Its acceptance report is docs/bugfix-plans/status/integration.md. Preserve those fixes, versioned projection upgrades, filter-state behavior, and the newer local token burn feature. The working tree contains substantial uncommitted work; do not reset, stash, checkout old versions, commit, publish, release, or modify the user's live index, original logs, or account credentials.
+Paths in these plans are relative to the repository root unless stated otherwise. Keep live chat/project identifiers and machine-specific paths in ignored `.local-data/planning/` records, not in committed planning documents.
+
+The prior bug-fix integration chat has completed. Its acceptance report is docs/bugfix-plans/status/integration.md. Preserve those fixes, versioned projection upgrades, filter-state behavior, and the newer local token burn feature. The working tree contains substantial uncommitted work; do not reset, stash, checkout old versions, commit, publish, release, or modify the user's live index, original logs, or account credentials.
 
 ## Metric definitions
 

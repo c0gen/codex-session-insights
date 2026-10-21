@@ -4,9 +4,9 @@ Own final acceptance after the four implementation owners finish. Read README.md
 
 ## Preparation and coordination
 
-Inspect the current implementation and prepare acceptance checks while owners work, without editing their files. Use compact wait_threads calls for the four IDs in assignments.json, preserving returned cursors and using 30000 to 60000 ms waits. A status file is not sufficient while its owner is still actively editing. Do not message other chats; the parent will handle any explicit coordination needed. You may read their final summaries and result files as evidence.
+Inspect the current implementation and prepare acceptance checks while owners work, without editing their files. Obtain live chat identifiers from ignored local coordination records for the four implementation owners listed in assignments.json. Use compact wait_threads calls, preserving returned cursors and using 30000 to 60000 ms waits. A status file is not sufficient while its owner is still actively editing. Do not message other chats; the parent will handle any explicit coordination needed. You may read their final summaries and result files as evidence.
 
-Also wait for "Add token burn rate metric" (01a128b7-6eac-7683-a3e2-b14cfd991ccd) to settle before modifying overlapping files or treating a full-suite result as final. Preserve that user's work. If a worker needs attention, document the exact issue and continue independent work; do not claim completion with unresolved defects.
+Also wait for "Add token burn rate metric" to settle before modifying overlapping files or treating a full-suite result as final. Preserve that user's work. If a worker needs attention, document the exact issue and continue independent work; do not claim completion with unresolved defects.
 
 ## Owned work after implementations settle
 

@@ -1,0 +1,7 @@
+.history-group { border-top: 1px solid var(--border, #dde2e8); margin-top: 24px; padding-top: 16px; }
+.history-group h3, .history-locations { overflow-wrap: anywhere; }
+.history-version { border: 1px solid var(--border, #dde2e8); border-radius: 10px; padding: 16px; margin: 12px 0; }
+.history-version h4 { margin: 0 0 8px; }
+.history-locations { padding-left: 18px; font-size: 12px; }
+.history-error { color: var(--danger, #ad302b); }
+.modal:has(.history-group) { max-width: 800px; }

@@ -18,17 +18,21 @@ from .accounts import Accounts
 from .claude_usage import ClaudeUsage
 from .antigravity_usage import AntigravityUsage
 from .local_token_burn import LocalTokenBurn
+from .live_index import LivePaths
 
 
 class Engine:
     def __init__(self, directory, demo=False, exporter=False, allowance_provider=None, defer_projection=False):
         self.store = Store(directory)
+        from .dashboard_cache import DashboardCache
+        self.dashboard_cache = DashboardCache(self.store)
         self.exporter = exporter
         self.window = None
         self.desktop = None
         from .widget_queries import WidgetSummaries
         self.widget_summaries = WidgetSummaries(self.store)
         self.jobs = Jobs()
+        self.store.live_paths = LivePaths()
         self.executor = self.jobs.executor
         self.stop, self.cancel, self.dirty = self.jobs.stop, self.jobs.cancel, self.jobs.dirty
         self.job_lock = self.jobs.lock
@@ -79,7 +83,15 @@ class Engine:
         return self.jobs.job
 
     def submit(self, message, action, **options):
-        return self.jobs.submit(message, action, **options)
+        def run():
+            from .cooperative import live_work
+            self.store.maintenance_cancel = self.cancel if options.get('cancelable') else self.stop
+            try:
+                with live_work(self.store, self.store.maintenance_cancel):
+                    return action()
+            finally:
+                self.store.maintenance_cancel = None
+        return self.jobs.submit(message, run, **options)
 
     def progress(self, value):
         self.jobs.progress(value)
@@ -100,7 +112,8 @@ class Engine:
         if getattr(self, "_started", False):
             return
         self._started = True
-        if (self.store.setting('projection_version') != PROJECTION_VERSION
+        from .projection_state import needs_rebuild
+        if (needs_rebuild(self.store, PROJECTION_VERSION)
                 or self.store.setting('bucket_version') != 1 or self.store.setting('project_groups_version') != 1):
             def maintenance():
                 ensure_projection(self.store, self.progress)
@@ -119,7 +132,9 @@ class Engine:
         self.configure_watchers()
         def watch():
             while not self.stop.wait(1):
-                if self.jobs.automatic_ready(self.dirty.is_set()):
+                live = self.store.live_paths
+                retry_due = live.poll_retries(self.store)
+                if self.jobs.automatic_ready(self.dirty.is_set() or retry_due or live.discovery_due() or bool(live.pending())):
                     self.dirty.clear()
                     self.refresh(automatic=True)
         self.watch_thread = threading.Thread(target=watch,daemon=True)
@@ -135,11 +150,13 @@ class Engine:
             from watchdog.observers import Observer
             engine = self
             class Events(FileSystemEventHandler):
-                def __init__(self, suffix='.jsonl'):
+                def __init__(self, source, suffix='.jsonl'):
                     super().__init__()
+                    self.source = source
                     self.suffix = suffix
                 def on_any_event(self,event):
-                    if event.event_type in {"created","modified","moved","deleted"} and (event.is_directory or event.src_path.lower().endswith(self.suffix)):
+                    if event.event_type in {"created","modified","moved","deleted"}:
+                        engine.store.live_paths.event(self.source['id'], self.source['root'], event)
                         engine.dirty.set()
             observer = Observer()
             for source in self.store.sources():
@@ -147,7 +164,7 @@ class Engine:
                     if source.get('format') == 'antigravity_legacy':
                         continue
                     else:
-                        observer.schedule(Events(), source["root"], recursive=True)
+                        observer.schedule(Events(source), source["root"], recursive=True)
             observer.start(); self.observer = observer
         except (ImportError,OSError):
             self.observer = None
@@ -160,6 +177,7 @@ class Engine:
         if getattr(self, "watch_thread", None):
             self.watch_thread.join(timeout=3)
         self.jobs.close()
+        self.dashboard_cache.close()
         if self.observer:
             self.observer.stop(); self.observer.join(timeout=3)
 
@@ -181,6 +199,24 @@ class Engine:
 
     def call(self, action, args=None):
         args = args or {}
+        if action == 'bootstrap':
+            from .projection_state import status
+            with self.store.connect() as db:
+                pending = status(db)
+            return {'ready': True, 'cached_overview': self.dashboard_cache.snapshot.load(args), 'projection': pending}
+        if action == 'live_status':
+            from .projection_state import status
+            with self.store.connect() as db:
+                pending = status(db)
+            rates = self.local_token_burn.read_rates()
+            include_accounts = args.get('accounts') is True
+            value = {'ready': True, 'projection': pending, 'job': self.call('status'), 'desktop': self.call('desktop_state'),
+                     'usage_limits': {**self.accounts.current_allowance(), **rates},
+                     'provider_allowances': self.provider_allowances(), 'account_token_total': self.accounts.token_total(),
+                     'indexing': rates.get('token_burn_rate', {}).get('indexing')}
+            if include_accounts:
+                value['accounts'] = {**self.accounts.read(), **rates}
+            return value
         if action == 'refresh_antigravity_usage':
             return self.antigravity_usage.refresh()
         if action == 'antigravity_usage_settings':
@@ -258,18 +294,32 @@ class Engine:
             value["accounts"] = self.local_token_burn.decorate(self.accounts.read())
             return value
         if action == "dashboard":
-            data = dashboard(self.store,args)
+            data = self.dashboard_cache.read(args)
             data["provider_allowances"] = self.provider_allowances()
             data["provider_setup"] = self.provider_setup.states()
             data["job"] = self.jobs.snapshot()
             data["exporter"] = self.exporter
+            data['claude_recovery'] = self.call('claude_history_recovery')
+            data['coverage']['identity_issues'] = data['claude_recovery']['identity_issues']
             data["desktop"] = self.call("desktop_state")
             data["usage_limits"] = self.local_token_burn.decorate(self.accounts.current_allowance())
-            data["account_token_total"] = self.accounts.read()["token_total"]
+            data["account_token_total"] = self.accounts.token_total()
             data["settings"]["live_usage_enabled"] = self.accounts.enabled
             data["settings"]["claude_usage_enabled"] = self.claude_usage.enabled
             data['settings']['antigravity_usage_enabled'] = self.antigravity_usage.enabled
             return data
+        if action == "history_conflicts":
+            from .history_review import read
+            with self.store.lock, self.store.connect() as db:
+                db.execute('BEGIN')
+                return read(db)
+        if action == 'claude_history_recovery':
+            from .claude_recovery_store import status
+            with self.store.connect() as db:
+                return status(db)
+        if action == "resolve_history_conflict":
+            from .history_review import resolve
+            return self.submit("Updating accepted history", lambda: resolve(self.store, args))
         if action == "status":
             return {**self.jobs.snapshot(), "revision": self.store.setting("data_revision", 0)}
         if action == "refresh":
@@ -290,10 +340,12 @@ class Engine:
             sid = args["id"]
             def update_sources():
                 if action == "forget_source":
-                    self.store.forget_source(sid)
+                    self.store.forget_source(sid, reprojection=True)
                 else:
                     with self.store.lock, self.store.connect() as db:
+                        from .projection_state import request
                         db.execute("UPDATE sources SET enabled=? WHERE id=?",(int(bool(args["enabled"])),sid))
+                        request(db)
                 rebuild_projection(self.store)
                 self.configure_watchers()
             return self.submit("Updating included sources",update_sources)
@@ -310,9 +362,11 @@ class Engine:
             if not 0 <= fast <= 100:
                 raise ValueError("Fast share must be between 0 and 100")
             def update_settings():
-                self.store.set_setting("timezone",zone)
-                self.store.set_setting("assumed_fast_percent",fast)
-                self.store.set_setting("device_label",str(args.get("device_label","This computer"))[:200])
+                from .projection_state import request
+                with self.store.lock, self.store.connect() as db:
+                    request(db, {'timezone': zone, 'assumed_fast_percent': fast})
+                    db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',
+                               ('device_label', json.dumps(str(args.get('device_label', 'This computer'))[:200])))
                 rebuild_projection(self.store)
             return self.submit("Updating timezone and pricing",update_settings)
         if action in {"alias", "merge_projects"}:
@@ -328,7 +382,15 @@ class Engine:
             if not path:
                 return {"status":"cancelled"}
             def update():
-                result = import_catalog(self.store,path); rebuild_projection(self.store); return result
+                from .pricing_catalog import parse_catalog
+                from .projection_state import request
+                value = json.loads(Path(path).read_text(encoding='utf-8'))
+                parsed = parse_catalog(value)
+                with self.store.lock, self.store.connect() as db:
+                    request(db, {'pricing_catalog': value})
+                rebuild_projection(self.store)
+                apply_catalog(value)
+                return {'models': len(parsed), 'verified_at': value.get('verified_at')}
             return self.submit("Updating pricing catalog",update)
         if action == "export_html":
             from .report import export_html

@@ -1,5 +1,31 @@
 # Unreleased — concurrent accounts, faster grouping and live allowance
 
+## Token Worlds
+
+- Show literal novel collections with 150 books/bookcase, expanding aisles, floor-plan navigation and fractional final books. Give Floppy Vault fixed 100-disk cases and 20-case racks with inspectable contents.
+- Keep paper-height callouts clear of the stack, add orthographic landmark comparisons and improve camera fitting. Add selectable unrolled/globe trail views, route close-ups, and continuous/30-minute/one-hour daily reading schedules. Preserve those views and qualifications in offline reports and PNG captures.
+- Add a Visualizations gallery and Overview's Explore in 3D link, with Paper Tower, Infinite Library, Paper Trail, Reading Journey and Floppy Vault. Share the existing token accounting and disclose approximations, repeated context, grouped objects and enlarged paper width.
+- Add measured GLB props authored in AI Design, orbit/keyboard/camera controls, imperial/metric units, true paper proportions, PNG copy/save and graphics-failure fallbacks. Preserve camera/focus through live updates and release graphics resources when leaving the gallery.
+- Embed every scene and model in standalone HTML reports while retaining analyzed-snapshot semantics and excluding live account totals. Keep the widget build independent. See [implementation and validation](token-worlds.md).
+
+## 0.1.6 — Claude agent identity recovery
+
+- Identify Claude agents from session/agent metadata and validated flat, nested and workflow transcript layouts. Agent identities include the owning session, preventing unrelated agents with matching filenames from colliding.
+- Automatically back up and recover existing Claude indexes through resumable staging. Preserve rejected checkpoints, retained alternatives and valid review choices; archive choices that incorrectly selected between separate agents. Uncertain evidence remains pending.
+- Add read-only `diagnose-history`, a persisted recovery report, and parent/agent classification with deduplicated alternative-only token counts in Review conflicts. Recorded counters across versions are not additive.
+- Keep transfer v6 and v1–v6 imports. Recover on the Mac with its existing index and export again using the same exporter identity; v5 snapshots cannot supply alternatives they omitted.
+- Native Intel Mac packaging and the user's original Mac conflict audit must be completed on the Mac. Windows validation cannot establish the amount recoverable there.
+
+## 0.1.5 — Reviewable history conflicts
+
+- Recognize formatting/key-order-only JSON copies through ordered normalized record proofs; retain original physical boundaries for replay accounting. Verified extensions replace shorter histories without adding cumulative counters together.
+- Retain divergent sanitized versions and add **Review conflicts** to Mac and Windows Sources. Keep accepted, choose another version, or undo; choices persist and new incompatible activity reopens review. Separate copy disagreements, accounting overlaps, parsing errors and unavailable evidence.
+- Transfer v6 carries accepted histories, alternatives and local review decisions. Imports v1–v5 remain supported. Update Windows before importing new Mac snapshots; re-export on the Mac to recover alternatives omitted by older exports.
+- Back up existing SQLite indexes before migration and recover rejected alternatives from parser checkpoints. Reparse accessible sources once and preserve unavailable evidence for later verification. Original logs remain unchanged.
+- Native Intel Mac packaging validation must run on an Intel Mac before publishing its build.
+
+## Earlier unreleased work
+
 - Prepare version 0.1.4 with Intel Mac exporter bridge packaging, a dedicated bundled headless helper, and safe Update of previously owned commands. Missing helpers affect bridge setup only.
 - Discover standard and `CLAUDE_CONFIG_DIR` Claude histories, preserve disabled/forgotten sources, and isolate bridge ownership and restored status-line commands by profile.
 - Refresh sessions before desktop/CLI usage exports. Save retained history with persistent warnings when sources cannot be refreshed; cancellation before publication and failed writes preserve an existing snapshot. Completion results include refresh counts and warnings.

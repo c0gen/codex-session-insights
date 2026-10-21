@@ -32,11 +32,12 @@ class PollingCache:
             self.thread = threading.Thread(target=self._run, daemon=True, name="insights-account-cache")
             self.thread.start()
 
-    def read(self):
+    def read(self, fields=None):
         with self.lock:
             stale = self.last_success is not None and (self.failures > 0 or self.clock() - self.last_success > self.interval * 2 or not self.enabled)
             status = "disabled" if not self.enabled else "stale" if stale else "available" if self.available(self.payload) else "unavailable"
-            snapshot = {**copy.deepcopy(self.payload), "enabled": self.enabled, "allowed": self.allowed,
+            payload = self.payload if fields is None else {key: self.payload[key] for key in fields if key in self.payload}
+            snapshot = {**copy.deepcopy(payload), "enabled": self.enabled, "allowed": self.allowed,
                     "status": status, "refreshing": self.refreshing or self.pending, "stale": stale,
                     "last_success_at": self.last_success, "next_refresh_at": self.next_refresh,
                     "error": self.error, "error_code": self.error_code}

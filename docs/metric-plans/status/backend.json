@@ -78,6 +78,5 @@
     "Public report serialization already preserves the new fields; dedicated backend test verified it. Full production frontend builds and browser/offline acceptance remain with interface/integration owners.",
     "No frontend/shared documentation edits, commits, releases, original log changes, live user data changes, additional chats or messages to other chats were made."
   ],
-  "blockers": [],
-  "notification": "notify_andy tools were not available in this chat; no completion alert could be sent."
+  "blockers": []
 }

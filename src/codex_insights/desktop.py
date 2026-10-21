@@ -58,23 +58,37 @@ def run_desktop(engine, url, smoke_result=None, instance=None):
         background_color="#10171c", hidden=bool(smoke or desktop_check),
     )
     started = threading.Event()
+    native_ready = threading.Event()
     controller = None
     if platform.system() == "Windows" and not engine.exporter and not smoke:
         from .desktop_controller import DesktopController
-        controller = engine.desktop = DesktopController(engine)
 
         def prepare_native():
+            nonlocal controller
             try:
+                controller = engine.desktop = DesktopController(engine)
                 from .windows_desktop import WindowsDesktop
                 controller.attach(WindowsDesktop(window, url, Bridge(), engine.store))
                 if instance:
                     instance.listen(lambda: controller.command("show_dashboard"))
+                native_ready.set()
             except Exception:
                 log.exception("Optional desktop integration unavailable")
                 engine.desktop = None
                 if instance:
                     instance.listen(window.show)
-        window.events.before_show += prepare_native
+                native_ready.set()
+        if hasattr(engine, 'when_ready'):
+            def prepare_when_ready():
+                def dispatch():
+                    if engine.stop.is_set():
+                        return
+                    from System import Action
+                    window.native.BeginInvoke(Action(prepare_native))
+                engine.when_ready(dispatch)
+            window.events.loaded += prepare_when_ready
+        else:
+            window.events.before_show += prepare_native
 
     def loaded():
         log.info("Dashboard loaded")
@@ -86,6 +100,9 @@ def run_desktop(engine, url, smoke_result=None, instance=None):
         if smoke:
             verify_native(window, smoke, exporter=engine.exporter)
         elif desktop_check and first_load:
+            if hasattr(engine, 'ready'):
+                engine.ready.wait(30)
+                native_ready.wait(10)
             from .desktop_verification import verify_desktop
             verify_desktop(engine, window, desktop_check, images)
 
@@ -114,6 +131,8 @@ def diagnose():
         "platform": platform.system(), "architecture": platform.machine(),
         "frontend_present": (ui_directory() / "index.html").is_file(),
     }
+    from .sqlite_runtime import diagnostic as sqlite_diagnostic
+    result['sqlite'] = sqlite_diagnostic()
     try:
         from webview.guilib import initialize
         backend = initialize("edgechromium" if platform.system() == "Windows" else None)

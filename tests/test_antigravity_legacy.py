@@ -126,6 +126,10 @@ def test_prior_transfer_versions_remain_accepted(tmp_path, version):
     with zipfile.ZipFile(snapshot) as bundle:
         manifest = json.loads(bundle.read('manifest.json'))
         content = bundle.read('facts.jsonl')
+    from conftest import legacy_records
+    import hashlib
+    content = legacy_records(content)
+    manifest['facts_sha256'] = hashlib.sha256(content).hexdigest()
     manifest['format_version'] = version
     old = tmp_path / 'old.codex-insights'
     with zipfile.ZipFile(old,'w') as bundle:

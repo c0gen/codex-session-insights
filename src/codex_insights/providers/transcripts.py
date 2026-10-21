@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from ..codec import digest, timestamp
+from ..copy_proofs import observe_record, fact_proofs
 from ..parser import project_identity
 
 
@@ -33,7 +34,7 @@ def usage_record(value):
 
 
 class TranscriptParser:
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self, provider, state=None, path=None, bridge=False):
         self.provider = provider
@@ -41,7 +42,11 @@ class TranscriptParser:
         self.path = Path(path) if path else None
         self.state = state or {"version": self.VERSION, "offset": 0, "ordinal": 0, "hash": "",
                                "proofs": {}, "fact": None, "parse_errors": 0,
+                               "record_hash": "", "record_proofs": {},
                                "responses": {}, "messages_seen": []}
+        if provider == 'claude_code' and state is None:
+            from .claude_identity import PARSER_VERSION
+            self.state['version'] = PARSER_VERSION
 
     def consume(self, raw, end_offset):
         s = self.state
@@ -54,7 +59,9 @@ class TranscriptParser:
                 raise ValueError()
         except (ValueError, UnicodeError):
             s["parse_errors"] += 1
+            observe_record(s, None, raw)
             return
+        observe_record(s, e)
         self.consume_event(e, end_offset)
 
     def consume_event(self, e, end_offset):
@@ -65,6 +72,16 @@ class TranscriptParser:
         if self.bridge and e.get("bridge_schema") != 1:
             return
         message = e.get("message") if isinstance(e.get("message"), dict) else {}
+        resolved = None
+        if self.provider == 'claude_code':
+            from .claude_identity import resolve
+            resolved = resolve(e, self.path, s.get('claude_identity'))
+            if resolved is None:
+                if e.get('type') in {'assistant', 'user'}:
+                    from .claude_identity import IdentityError
+                    raise IdentityError('missing_session_or_agent_id')
+                return
+            s['claude_identity'] = resolved
         sid = e.get("sessionId") or e.get("conversationId") or e.get("session_id")
         subagent = self.path and self.path.parent.name == "subagents"
         if subagent:
@@ -72,7 +89,11 @@ class TranscriptParser:
         if not sid and self.provider == "antigravity" and self.path:
             sid = self.path.parents[2].name
         if not isinstance(sid, str) or not sid or len(sid) > 400:
-            return
+            if resolved is None:
+                return
+        if resolved:
+            sid = resolved['suffix']
+            subagent = resolved['agent_id'] is not None
         if s["fact"] is None:
             identity = self.provider + ":" + sid
             s["fact"] = {"provider": self.provider, "id": identity,
@@ -82,6 +103,8 @@ class TranscriptParser:
                 "parent_session_id": self.provider + ":" + str(e.get("sessionId")) if subagent and e.get("sessionId") else None,
                 "spawn_timestamp": t, "raw_token_trace": [], "messages": [], "change_events": [],
                 "activity": [], "tools": {}, "contexts": []}
+            if resolved:
+                s['fact']['parent_session_id'] = resolved['parent_session_id']
         f = s["fact"]
         model = message.get("model") or e.get("modelName")
         model = model[:200] if isinstance(model, str) else None
@@ -148,4 +171,4 @@ class TranscriptParser:
         s = self.state
         return {**s["fact"], "raw_token_trace": list(s["responses"].values()),
                 "prefix_hash": s["hash"], "byte_count": s["offset"], "record_count": s["ordinal"],
-                "proofs": s["proofs"], "parse_errors": s["parse_errors"]}
+                "proofs": s["proofs"], "parse_errors": s["parse_errors"], **fact_proofs(s)}

@@ -45,6 +45,5 @@
   "required_integration_work": [
     "Run the integration-owned frontend production build and combined browser suite after all owners finish. Include both new filter QA scripts in combined acceptance."
   ],
-  "backend_export_contract_requirement": "No backend change is required for B4/B5: existing export_html accepts the immutable applied Filters snapshot. It retains its existing behavior of querying current indexed data at export time rather than exporting a frozen data revision.",
-  "optional_notification": "notify_andy tools were not available in this chat."
+  "backend_export_contract_requirement": "No backend change is required for B4/B5: existing export_html accepts the immutable applied Filters snapshot. It retains its existing behavior of querying current indexed data at export time rather than exporting a frozen data revision."
 }

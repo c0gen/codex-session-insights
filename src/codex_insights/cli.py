@@ -33,6 +33,8 @@ def main(argv=None):
     imp=subs.add_parser('import');imp.add_argument('snapshot',type=Path)
     report=subs.add_parser('report');report.add_argument('--output',type=Path,required=True);report.add_argument('--include-names',action='store_true')
     subs.add_parser('catalog')
+    diagnostic = subs.add_parser('diagnose-history', help='Read history evidence without changing the index')
+    diagnostic.add_argument('--output', type=Path)
     legacy=subs.add_parser('diagnose-antigravity-legacy', help='Retired: encrypted archive collection is disabled')
     legacy.add_argument('--root', type=Path, required=True)
     legacy.add_argument('--profile', type=Path, required=True)
@@ -40,6 +42,14 @@ def main(argv=None):
     legacy.add_argument('--output', type=Path)
     args=parser.parse_args(argv)
     args.command=args.command or 'gui'
+    if args.command == 'diagnose-history':
+        from .history_diagnostics import diagnose as diagnose_history
+        result = json.dumps(diagnose_history(args.data_dir), indent=2)
+        if args.output:
+            args.output.write_text(result, encoding='utf-8')
+        else:
+            print(result)
+        return 0
     if args.command == 'diagnose-antigravity-legacy':
         print(json.dumps({'status': 'disabled', 'diagnostic': 'legacy_collection_disabled',
                           'detail': 'Use documented public transcripts and official hooks. Existing indexed history is retained.'}))
@@ -63,8 +73,11 @@ def main(argv=None):
             return 0
     engine = None
     try:
-        engine=Engine(directory,args.demo,args.command=='exporter',
-                      defer_projection=args.command in ('gui', 'exporter', 'serve'))
+        if args.command in ('gui', 'exporter'):
+            from .deferred_engine import DeferredEngine
+            engine = DeferredEngine(directory, args.demo, args.command == 'exporter')
+        else:
+            engine=Engine(directory,args.demo,args.command=='exporter', defer_projection=args.command == 'serve')
         if args.command in ('scan','export'):
             if getattr(args,'root',None):
                 # Explicit roots replace default roots for this command's indexed population.

@@ -23,7 +23,7 @@ def migrate(db):
 def coverage(db, table, where, params):
     rows = db.execute("SELECT r.provider,count(DISTINCT r.session_id) sessions,"
         "count(DISTINCT CASE WHEN r.known_total>0 THEN r.session_id END) recorded_sessions "
-        "FROM " + table + " r JOIN canonical c ON c.segment_id=r.segment_id WHERE " + where +
+        "FROM " + table + " r JOIN session_metadata c ON c.segment_id=r.segment_id WHERE " + where +
         " GROUP BY r.provider", params).fetchall()
     providers = [dict(row) for row in rows]
     sessions = sum(row["sessions"] for row in rows)

@@ -4,13 +4,7 @@ import { esc, tip } from "./ui";
 import { icon } from "./icons";
 import { includeProjectNames, setIncludeProjectNames, initializeSummaryImagePreferences, summaryImageSnapshot } from "./summary-image-data";
 import { renderSummaryImage } from "./summary-image-render";
-
-const pngBase64 = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = () => resolve(String(reader.result).split(",")[1]);
-  reader.onerror = () => reject(new Error("Could not read the summary image."));
-  reader.readAsDataURL(blob);
-});
+import { copyPng, savePng } from "./image-transport";
 
 export function summaryImageSettings(): string {
   return `<label class="toggle-label"><input id="summary-image-project-names" type="checkbox" ${includeProjectNames() ? "checked" : ""}> Include project names in copied images ${tip("Shows the selected project name. All-project summaries do not list project names.")}</label>`;
@@ -81,14 +75,7 @@ export class SummaryImageCopy {
     try {
       description = summaryImageSnapshot(data);
       image = renderSummaryImage(description);
-      if (window.pywebview?.api) {
-        const response = await window.pywebview.api.call("copy_summary_image", { png_base64: await pngBase64(await image) }) as { status: string };
-        if (response?.status !== "copied") throw new Error("Clipboard write failed.");
-      } else {
-        if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error("Image clipboard unavailable.");
-        // Start the browser write in the click handler; encoding can finish later.
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": image })]);
-      }
+      await copyPng(image);
       this.notify("Image copied", false, 3000);
     } catch {
       if (image && description) {
@@ -106,17 +93,9 @@ export class SummaryImageCopy {
     const image = this.failed;
     this.saving = true; this.update();
     try {
-      if (window.pywebview?.api) {
-        const result = await window.pywebview.api.call("save_summary_image", { png_base64: await pngBase64(image.blob), filename: image.filename }) as { status: string };
-        if (result?.status === "cancelled") return;
-        if (result?.status !== "saved") throw new Error("Image save failed.");
-        this.notify("Image saved", false, 3000);
-      } else {
-        const url = URL.createObjectURL(image.blob), anchor = document.createElement("a");
-        anchor.href = url; anchor.download = image.filename; anchor.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        this.notify("PNG download started", false, 3000);
-      }
+      const result = await savePng(image.blob, image.filename);
+      if (result === "cancelled") return;
+      this.notify(result === "saved" ? "Image saved" : "PNG download started", false, 3000);
       this.failed = null;
     } catch { this.notify("Couldn’t save the image. Please try again.", true); }
     finally { this.saving = false; this.update(); }

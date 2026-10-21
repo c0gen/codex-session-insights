@@ -49,8 +49,12 @@ class Store:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.path = self.directory / "insights.sqlite3"
         self.lock = threading.RLock()
+        from .copy_migration import backup_before_upgrade
+        backup_before_upgrade(self.path)
         with self.connect() as db:
             db.executescript(SCHEMA)
+            from .index_health import migrate as migrate_index_health
+            migrate_index_health(db)
             for table in ("files", "candidates"):
                 if "parser_version" not in {row["name"] for row in db.execute("PRAGMA table_info(" + table + ")")}:
                     db.execute("ALTER TABLE " + table + " ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 0")
@@ -64,6 +68,12 @@ class Store:
             migrate(db)
             ensure_schema(db)
             project_groups.ensure_schema(db)
+            from .copy_migration import migrate as migrate_copies
+            migrate_copies(db)
+            from .claude_recovery_store import migrate as migrate_claude_recovery
+            migrate_claude_recovery(db)
+            from .hot_metadata import migrate as migrate_hot_metadata
+            migrate_hot_metadata(db)
             db.commit()
             db.execute("PRAGMA journal_mode=WAL")
             if not db.execute("SELECT 1 FROM settings WHERE key='exporter_id'").fetchone():
@@ -119,88 +129,26 @@ class Store:
                 db.execute("UPDATE sources SET status='Pending' WHERE id=?", (sid,))
             return sid
 
-    def put_candidate(self, db, source_id, fact, parser_version=0):
+    def put_candidate(self, db, source_id, fact, parser_version=0, path=None):
         provider = fact.setdefault("provider", "codex")
         if provider != "codex" and not fact["id"].startswith(provider + ":"):
             raise ValueError("Provider session identity must be namespaced")
         if fact.get('snapshot_mode') == 'complete_binary':
             from .providers.legacy.snapshots import put_snapshot
-            return put_snapshot(db, source_id, fact, parser_version)
-        if provider == 'antigravity' and fact.get('history_mode') == 'antigravity_steps':
+            put_snapshot(db, source_id, fact, parser_version)
+        elif provider == 'antigravity' and fact.get('history_mode') == 'antigravity_steps':
             from .providers.public_snapshots import put_snapshot
-            return put_snapshot(db, source_id, fact, parser_version)
-        # A source may contain several physical copies. Keep one bounded accepted
-        # history, allowing only proven extensions (or a reparse of equal bytes).
-        # No physical paths enter portable facts or conflict diagnostics.
-        old = db.execute("SELECT * FROM candidates WHERE source_id=? AND segment_id=?",
-                         (source_id, fact["segment_id"])).fetchone()
-        conflict = old["same_source_conflict"] if old else 0
-        if old:
-            accepted = unpack(old["fact"])
-            equal = (fact["byte_count"] == accepted["byte_count"]
-                     and fact["prefix_hash"] == accepted["prefix_hash"])
-            extends = fact.get("proofs", {}).get(str(accepted["byte_count"])) == accepted["prefix_hash"]
-            if not equal and not extends:
-                shorter = accepted.get("proofs", {}).get(str(fact["byte_count"])) == fact["prefix_hash"]
-                if not shorter:
-                    # Persist this warning even when an unchanged refresh skips
-                    # the divergent file or a later accepted copy is reparsed.
-                    db.execute("UPDATE candidates SET same_source_conflict=1 WHERE source_id=? AND segment_id=?",
-                               (source_id, fact["segment_id"]))
-                return
-        db.execute("INSERT OR REPLACE INTO candidates(source_id,segment_id,session_id,parent_id,record_count,trace_count,byte_count,prefix_hash,fact,parser_version,same_source_conflict) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
-            source_id, fact["segment_id"], fact["id"], fact.get("parent_session_id"), fact["record_count"],
-            len(fact["raw_token_trace"]), fact["byte_count"], fact["prefix_hash"], pack(fact), parser_version, conflict))
-
-        db.execute("UPDATE candidates SET provider=? WHERE source_id=? AND segment_id=?", (provider, source_id, fact["segment_id"]))
+            put_snapshot(db, source_id, fact, parser_version)
+        from .copy_store import put
+        put(db, source_id, fact, parser_version, path)
 
     def choose_canonical(self, db, segment_id):
-        rows = db.execute("SELECT c.* FROM candidates c JOIN sources s ON s.id=c.source_id WHERE c.segment_id=? AND s.enabled=1 ORDER BY c.record_count DESC,c.parser_version DESC,c.source_id", (segment_id,)).fetchall()
-        old = db.execute("SELECT * FROM canonical WHERE segment_id=?", (segment_id,)).fetchone()
-        if not rows:
-            db.execute("DELETE FROM canonical WHERE segment_id=?", (segment_id,))
-            db.execute("DELETE FROM session_projects WHERE segment_id=?", (segment_id,))
-            db.execute("DELETE FROM records WHERE segment_id=?", (segment_id,))
-            db.execute("DELETE FROM metric_buckets WHERE segment_id=?", (segment_id,))
-            return True
-        winner = rows[0]
-        fact = unpack(winner["fact"])
-        conflicting = []
-        for row in rows[1:]:
-            shorter = unpack(row["fact"])
-            if fact.get('snapshot_mode') == shorter.get('snapshot_mode') == 'complete_binary':
-                from .providers.legacy.snapshots import compatible
-                matches = compatible(fact, shorter)
-            elif fact.get('history_mode') == shorter.get('history_mode') == 'antigravity_steps':
-                from .providers.public_snapshots import compatible
-                matches = compatible(fact, shorter)
-            else:
-                matches = fact.get("proofs", {}).get(str(shorter["byte_count"])) == shorter["prefix_hash"]
-            if not matches:
-                conflicting.append(row["source_id"])
-        if conflicting and old and any(r["source_id"] == old["source_id"] for r in rows):
-            winner = next(r for r in rows if r["source_id"] == old["source_id"])
-            fact = unpack(winner["fact"])
-        # Ignored same-source branches are diagnostics, not competing accepted
-        # candidates; they must not block a proven fuller copy in another source.
-        conflicting.extend(row["source_id"] for row in rows if row["same_source_conflict"])
-        previous_diagnostic = json.loads(old["diagnostic"] or "{}") if old else {}
-        diagnostic = json.dumps({**previous_diagnostic, "conflicts": sorted(set(conflicting)), "parse_errors": fact.get("parse_errors", 0)})
-        project_groups.register_session(db, segment_id, fact)
-        changed = not old or old["fact"] != winner["fact"] or old["source_id"] != winner["source_id"]
-        if not changed:
-            db.execute("UPDATE canonical SET diagnostic=? WHERE segment_id=?", (diagnostic, segment_id))
-            return json.loads(diagnostic) != previous_diagnostic
-        db.execute("INSERT OR REPLACE INTO canonical(segment_id,source_id,session_id,parent_id,project_id,project_label,category,last_active,trace_count,fact,diagnostic) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
-            segment_id, winner["source_id"], fact["id"], fact.get("parent_session_id"), fact["project_id"],
-            fact["project_label"], fact["session_source"], None, len(fact["raw_token_trace"]), winner["fact"], diagnostic))
-        db.execute("UPDATE canonical SET provider=? WHERE segment_id=?", (fact.get("provider", "codex"), segment_id))
-        return True
+        from .copy_canonical import choose
+        return choose(db, segment_id)
 
     def related_segments(self, db, changed, removed_session_ids=()):
-        # Copied responses may move ownership when any provider history changes.
-        result = set(changed)
-        result.update(r[0] for r in db.execute("SELECT segment_id FROM canonical WHERE provider!='codex'"))
+        from .hot_metadata import accounting_dependencies
+        result = accounting_dependencies(db, changed)
         todo = list(changed)
         visited = set()
         for sid in removed_session_ids:
@@ -218,7 +166,7 @@ class Store:
                     result.add(child[0]); todo.append(child[0])
         return result
 
-    def forget_source(self, source_id):
+    def forget_source(self, source_id, *, reprojection=False):
         with self.lock, self.connect() as db:
             source = db.execute("SELECT provider,root,kind FROM sources WHERE id=?", (source_id,)).fetchone()
             if source and source['provider'] == 'claude_code' and source['kind'] == 'folder' and source['root']:
@@ -227,8 +175,15 @@ class Store:
             segments = [r[0] for r in db.execute("SELECT segment_id FROM candidates WHERE source_id=?", (source_id,))]
             db.execute("DELETE FROM files WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM file_failures WHERE source_id=?", (source_id,))
+            from .index_health import forget as forget_index_health
+            forget_index_health(db, source_id)
             db.execute('DELETE FROM source_private WHERE source_id=?', (source_id,))
             db.execute('DELETE FROM source_diagnostics WHERE source_id=?', (source_id,))
+            from .copy_store import forget
+            forget(db, source_id)
             db.execute("DELETE FROM candidates WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM sources WHERE id=?", (source_id,))
+            if reprojection:
+                from .projection_state import request
+                request(db)
             return segments

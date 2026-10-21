@@ -1,0 +1,20 @@
+.cache-rate { padding: 19px; margin-bottom: 20px; min-width: 0; }
+.cache-rate .panel-heading { padding: 0 0 12px; flex-wrap: wrap; gap: 14px; }
+.cache-rate h2 { display: flex; align-items: center; gap: 9px; }
+.cache-rate .fine-print { padding: 0; }
+.cache-rate-toolbar, .cache-rate-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.cache-rate-toolbar { justify-content: space-between; }
+#cache-rate-period { color: var(--muted); font-size: 12px; }
+.cache-rate-controls label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cache-rate-controls input { color-scheme: dark; max-width: 100%; background: var(--panel); color: inherit; border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.cache-rate-chart { height: 280px; margin: 18px 0; }
+.cache-rate-empty { color: var(--muted); padding: 12px 0; }
+.cache-rate summary { cursor: pointer; padding: 8px 0; }
+.cache-rate summary:focus-visible, .cache-rate-table:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+.cache-rate-table { overflow: auto; max-height: 380px; }
+.cache-rate-table table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.cache-rate-table caption { text-align: left; color: var(--muted); padding: 10px 0; }
+.cache-rate-table th, .cache-rate-table td { padding: 9px; text-align: right; border-bottom: 1px solid var(--border); }
+.cache-rate-table th:first-child { text-align: left; white-space: nowrap; }
+.cache-rate-table td:last-child { text-align: left; }
+@media (max-width: 600px) { .cache-rate-chart { height: 240px; } .cache-rate-table table { min-width: 650px; } }

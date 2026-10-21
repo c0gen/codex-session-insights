@@ -4,7 +4,7 @@ Read README.md and assignments.json in this directory. You own end-to-end comple
 
 ## Coordination
 
-Prepare independent acceptance cases now without modifying files owned by active implementation chats. Use compact wait_threads calls for the two IDs in assignments.json with retained cursors and 30000 to 60000 ms waits. Read their result JSONs and final summaries after they finish. Do not end the task just because they are still working. Do not message or steer unrelated chats, and do not create additional chats.
+Prepare independent acceptance cases now without modifying files owned by active implementation chats. Obtain live chat identifiers from ignored local coordination records for the backend and interface owners listed in assignments.json. Use compact wait_threads calls with retained cursors and 30000 to 60000 ms waits. Read their result JSONs and final summaries after they finish. Do not end the task just because they are still working. Do not message or steer unrelated chats, and do not create additional chats.
 
 The previous bug integration has finished; preserve its projection-version, startup, replay, parser-isolation, account identity, and filter fixes. The same checkout may also contain other uncommitted user work. Reread current files and make surgical changes.
 

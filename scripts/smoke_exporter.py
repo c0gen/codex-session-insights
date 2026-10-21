@@ -43,37 +43,69 @@ def main():
         # Prevent the packaged app from registering any real provider sources.
         source.set_setting('provider_defaults_registered', True)
         source.set_setting('timezone', 'UTC')
+        source.set_setting('live_usage_enabled', False)
         env = {**os.environ, 'CLAUDE_CONFIG_DIR': str(profile), 'CODEX_HOME': str(root / 'codex')}
         env['CODEX_INSIGHTS_SMOKE_MIN_TOKENS'] = '1600000'
         for name in ('CODEX_INSIGHTS_SMOKE_RESULT', 'CODEX_INSIGHTS_DESKTOP_SMOKE_RESULT',
                      'CODEX_INSIGHTS_ALLOWANCE_SMOKE_RESULT'):
             env.pop(name, None)
 
-        def run(*arguments):
-            completed = subprocess.run([str(executable), *map(str, arguments)], env=env,
+        def run(*arguments, environment=None):
+            completed = subprocess.run([str(executable), *map(str, arguments)], env=environment or env,
                                        capture_output=True, timeout=90)
-            assert completed.returncode == 0, completed.stderr.decode('utf-8', 'replace')
+            if completed.returncode:
+                startup = source.directory / 'startup.log'
+                raise AssertionError({'exit_code': completed.returncode,
+                                      'stderr': completed.stderr.decode('utf-8', 'replace'),
+                                      'stdout': completed.stdout.decode('utf-8', 'replace'),
+                                      'startup': startup.read_text(encoding='utf-8')[-12000:] if startup.exists() else None})
 
         if args.native_exporter:
             native = root / 'native.json'
             run('--data-dir', source.directory, 'exporter', '--smoke-result', native)
-            assert json.loads(native.read_text(encoding='utf-8'))['ok']
+            native_result = json.loads(native.read_text(encoding='utf-8'))
+            assert native_result['ok'], native_result
         snapshot = root / 'usage.codex-insights'
         run('--data-dir', source.directory, 'export', '--output', snapshot)
         local = dashboard(source, {'provider': 'claude_code'})
         assert local['summary']['cost'] == 17.25
         with zipfile.ZipFile(snapshot) as bundle:
-            assert json.loads(bundle.read('manifest.json'))['format_version'] == 5
+            assert json.loads(bundle.read('manifest.json'))['format_version'] == 6
             facts = bundle.read('facts.jsonl')
             assert b'PRIVATE_SMOKE_CANARY' not in facts and b'/private-smoke' not in facts
             assert b'"speed":"fast"' in facts and b'"inference_geo":"us"' in facts
         target = root / 'target'
-        run('--data-dir', target, 'import', snapshot)
+        receiver = Store(target)
+        receiver.set_setting('provider_defaults_registered', True)
+        receiver.set_setting('live_usage_enabled', False)
+        receiving_env = {**env, 'CLAUDE_CONFIG_DIR': str(root / 'receiver-profile'), 'CODEX_HOME': str(root / 'receiver-codex')}
+        run('--data-dir', target, 'import', snapshot, environment=receiving_env)
         remote = dashboard(Store(target), {'provider': 'claude_code'})
         assert remote['summary']['cost'] == local['summary']['cost']
         assert remote['summary']['priced_percent'] == local['summary']['priced_percent'] == 100
         assert remote['usage_metrics'] == local['usage_metrics']
-        print('Packaged v5 Claude cost export/import passed')
+        # Formatting-only copies reconcile in the packaged collector too.
+        (logs / 'formatted.jsonl').write_text(json.dumps(event, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
+        run('--data-dir', source.directory, 'export', '--output', snapshot)
+        from codex_insights.history_review import read
+        with source.connect() as db:
+            assert read(db) == []
+        conflicting = json.loads(json.dumps(event))
+        conflicting['message']['usage']['output_tokens'] = 200_000
+        (logs / 'divergent.jsonl').write_text(json.dumps(conflicting) + '\n', encoding='utf-8')
+        run('--data-dir', source.directory, 'export', '--output', snapshot)
+        run('--data-dir', target, 'import', snapshot, environment=receiving_env)
+        from smoke_history_review import check
+        check(executable, target, receiving_env)
+        # Receiving-side choices must never recirculate as locally observed facts.
+        outbound = root / 'no-local-history.codex-insights'
+        run('--data-dir', target, 'export', '--output', outbound, environment=receiving_env)
+        with zipfile.ZipFile(outbound) as bundle:
+            assert json.loads(bundle.read('manifest.json'))['fact_count'] == 0
+        print('Packaged v6 Claude cost export/import passed')
+        print('Packaged normalized-copy, retained alternatives and review API passed')
+        from smoke_claude_recovery import check as check_recovery
+        check_recovery(root / 'identity-recovery', run, env)
 
 
 if __name__ == '__main__':

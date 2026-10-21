@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import shutil
 from pathlib import Path
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -11,7 +12,12 @@ with tempfile.TemporaryDirectory() as temporary:
                             input=json.dumps({"rate_limits": {"five_hour": {"used_percentage": 0}},
                                               "prompt": "private-smoke-canary"}), text=True,
                             capture_output=True, timeout=15)
-    assert result.returncode == 0, result.stderr
+    if result.returncode and sys.platform == 'darwin' and shutil.which('lldb'):
+        diagnostic = subprocess.run(['lldb', '--batch', '-o', 'run', '-k', 'bt', '--', sys.argv[1],
+                                     '--data-dir', temporary, '--provider', 'claude_code', '--mode', 'status'],
+                                    input='', text=True, capture_output=True, timeout=40)
+        print(diagnostic.stdout, diagnostic.stderr, flush=True)
+    assert result.returncode == 0, {'exitcode': result.returncode, 'stderr': result.stderr, 'stdout': result.stdout}
     snapshot = (directory / "bridge/claude_code-allowance.json").read_text()
     assert "private-smoke-canary" not in snapshot
     assert json.loads(snapshot)["buckets"][0]["remaining_percent"] == 100

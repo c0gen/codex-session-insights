@@ -25,6 +25,18 @@ function unavailableReason(data: Dashboard, key: "cached" | "reasoning", denomin
 
 export function usageMetrics(data: Dashboard): string {
   const m = data.usage_metrics;
+  const basis = m?.reasoning_share_basis;
+  const partialReasoning = basis && basis.included_responses < basis.total_responses;
+  const reasoningDescription = partialReasoning
+    ? `Recorded subset · ${count(basis.included_responses)} of ${count(basis.total_responses)} responses.`
+    : "Reasoning tokens ÷ output tokens.";
+  const reasoningNote = "Reasoning is already included in output. Only responses recording both counters enter this ratio."
+    + (basis ? ` Recorded basis: ${count(basis.reasoning_tokens)} reasoning tokens ÷ ${count(basis.output_tokens)} output tokens; ${count(basis.included_responses)} of ${count(basis.total_responses)} responses.` : "");
+  const reasoningUnavailable = !basis ? unavailableReason(data, "reasoning", data.summary.output_tokens)
+    : !basis.total_responses ? "No recorded usage in this view."
+    : !basis.included_responses ? "No responses record both reasoning and output counters."
+    : !basis.output_tokens ? "No output tokens in recorded responses."
+    : "No valid reasoning/output ratio in recorded responses.";
   const card = (id: string, label: string, value: string, detail: string, explanation: string) =>
     `<section class="panel usage-metric" id="${id}"><h3>${label} ${tip(explanation)}</h3><strong class="usage-metric-value">${esc(value)}</strong><p>${esc(detail)}</p></section>`;
   const cachedState = metricState(data, "cached");
@@ -51,5 +63,5 @@ export function usageMetrics(data: Dashboard): string {
     discount == null ? "Unavailable" : discountAmount(discount), coverage,
     `API-equivalent estimate, not subscription savings: cached read tokens × (selected uncached-input price − cached-input price). Input volume, output and cache-write charges stay unchanged. A negative difference is a surcharge.${exact} ${discount == null ? "No estimate in this snapshot." : `Exact signed difference: ${discount} USD.`}`)}${ratio("cache-reuse", "Cache reuse rate", m?.cache_reuse_percent,
       "Cached reads ÷ all input tokens.", "Cache reads and writes are subsets of input.", unavailableReason(data, "cached", data.summary.input_tokens))}${ratio("reasoning-share", "Reasoning share", m?.reasoning_share_percent,
-      "Reasoning tokens ÷ output tokens.", "Reasoning is already included in output.", unavailableReason(data, "reasoning", data.summary.output_tokens))}</div>`;
+      reasoningDescription, reasoningNote, reasoningUnavailable)}</div>`;
 }

@@ -62,6 +62,8 @@ def test_old_checkpoint_reparses_and_recovers_overwritten_candidate(indexed):
         db.execute('UPDATE candidates SET fact=?,record_count=?,byte_count=?,prefix_hash=?,parser_version=2',
                    (pack(fact), fact['record_count'], fact['byte_count'], fact['prefix_hash']))
         db.execute('UPDATE files SET parser_version=2')
+        db.execute('DELETE FROM history_variants')
+        db.execute('DELETE FROM canonical')
     rebuild_projection(store)
     assert dashboard(store)['summary']['total_tokens'] == 110
     assert refresh(Store(store.directory))['changed_files'] == 2

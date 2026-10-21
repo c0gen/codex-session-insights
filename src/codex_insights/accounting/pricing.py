@@ -452,8 +452,8 @@ def _coerce_date(value):
     return None
 
 
-def rate_record_for_model(model_name, at=None):
-    records = MODEL_RATE_RECORDS.get(model_name) or []
+def rate_record_for_model(model_name, at=None, rate_records=None):
+    records = (MODEL_RATE_RECORDS if rate_records is None else rate_records).get(model_name) or []
     if not records:
         return None
     at_date = _coerce_date(at)
@@ -535,8 +535,9 @@ def estimate_token_cost(
     assumed_fast_share=0.0,
     at=None,
     request_input_tokens=None,
+    rate_records=None,
 ):
-    record = rate_record_for_model(model_name, at)
+    record = rate_record_for_model(model_name, at, rate_records)
     if not record:
         return None
     rate_config = record.get("rates") or {}

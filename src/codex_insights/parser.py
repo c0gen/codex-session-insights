@@ -10,11 +10,12 @@ from .accounting.structured_changes import StructuredChanges
 from .accounting.pricing import normalize_service_tier
 from .accounting.token_accounting import normalize_usage
 from .codec import digest, timestamp
+from .copy_proofs import observe_record, fact_proofs
 
 # Reparse physical files once, including older duplicate copies whose fuller
 # history may have been overwritten in the source candidate. Offline sources
 # keep their accepted facts and are upgraded when they become available.
-PARSER_VERSION = 3
+PARSER_VERSION = 4
 
 
 def optional_mapping(value, field):
@@ -88,7 +89,8 @@ class SessionParser:
         self.state = state or {"version": PARSER_VERSION, "ordinal": 0, "hash": "", "offset": 0,
                                "fact": None, "model": None, "effort": None, "tier": None,
                                "messages_seen": [], "tracker": {"events": [], "pending": {}, "cells": {}, "waits": {}},
-                               "boundaries": [], "record_boundaries": [], "proofs": {}, "parse_errors": 0}
+                               "boundaries": [], "record_boundaries": [], "proofs": {}, "parse_errors": 0,
+                               "record_hash": "", "record_proofs": {}}
         self.tracker = ChangeTracker()
         for key in ("events", "pending", "cells", "waits"):
             setattr(self.tracker, key, self.state["tracker"][key])
@@ -104,10 +106,13 @@ class SessionParser:
             event = json.loads(raw)
         except (ValueError, UnicodeError):
             self.state["parse_errors"] += 1
+            observe_record(self.state, None, raw)
             return
         if not isinstance(event, dict):
             self.state["parse_errors"] += 1
+            observe_record(self.state, None, raw)
             return
+        observe_record(self.state, event)
         pl = event.get("payload")
         t = timestamp(event.get("timestamp"))
         if not isinstance(pl, dict):
@@ -200,7 +205,7 @@ class SessionParser:
         fact.update(change_events=self.tracker.events, prefix_hash=self.state["hash"], byte_count=self.state["offset"],
                     record_count=self.state["ordinal"], boundaries=self.state["boundaries"],
                     last_event_ordinal=self.state.get("last_event_ordinal"), parse_errors=self.state["parse_errors"])
-        fact.update(record_boundaries=self.state["record_boundaries"], proofs=self.state["proofs"])
+        fact.update(record_boundaries=self.state["record_boundaries"], proofs=self.state["proofs"], **fact_proofs(self.state))
         return fact
 
 

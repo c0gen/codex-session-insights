@@ -96,15 +96,16 @@ def test_cancelled_backfill_resumes_remaining_files(indexed):
 def test_restart_finishes_queued_projection_without_rereading(indexed, monkeypatch):
     store, root, _ = indexed
     (root / "chat.jsonl").write_bytes(content())
-    original = ingestion.project_segments
+    from codex_insights import index_file
+    original = index_file.project_segments
     def interrupted(*args):
         raise RuntimeError("Simulated process interruption")
-    monkeypatch.setattr(ingestion, "project_segments", interrupted)
+    monkeypatch.setattr(index_file, "project_segments", interrupted)
     with pytest.raises(RuntimeError, match="interruption"):
         ingestion.refresh(store)
     with store.connect() as db:
         assert db.execute("SELECT count(*) FROM projection_queue").fetchone()[0] == 1
-    monkeypatch.setattr(ingestion, "project_segments", original)
+    monkeypatch.setattr(index_file, "project_segments", original)
     assert ingestion.refresh(Store(store.directory))["bytes_read"] == 0
     assert dashboard(store)["summary"]["lines_added"] == 2
     with store.connect() as db:

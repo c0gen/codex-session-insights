@@ -1,16 +1,27 @@
 """Five-minute token and API-dollar rates from reconciled local usage records."""
 import math
+import json
+import sqlite3
+from copy import deepcopy
 import threading
 import time
 from datetime import datetime, timezone
 
 from .burn_rates import empty_estimate
-from .codec import timestamp
+from .burn_coverage import evaluate, describe, reason
 
 
 def empty_local_rates(updated_at=None, **state):
+    if 'coverage' in state:
+        state['indexing'] = indexing_state(state['coverage'])
     return {kind: {**empty_estimate(updated_at), **state}
             for kind in ("token_burn_rate", "cost_burn_rate")}
+
+
+def indexing_state(coverage):
+    return {'live_checked_at': coverage.get('checked_at'),
+            'live_pending_files': coverage.get('live_pending_files', 0),
+            'historical_pending_files': coverage.get('historical_pending_files', 0)}
 
 
 def cost_estimate(common, total, priced_tokens, cost, window_seconds):
@@ -19,9 +30,24 @@ def cost_estimate(common, total, priced_tokens, cost, window_seconds):
               "priced_tokens": priced_tokens, "total_tokens": total}
     if priced_tokens < total:
         result["partial"] = True
+        coverage = deepcopy(result.get("coverage", {"state": "partial", "checked_at": None, "reasons": []}))
+        coverage["state"] = "partial"
+        coverage["reasons"].append(reason("unpriced_usage", count=total - priced_tokens))
+        result["coverage"] = coverage
+        result["detail"] = describe(coverage)
         if not priced_tokens:
             result.update(value=None, status="unavailable")
     return result
+
+
+def stale_estimate(rate, coverage, detail):
+    coverage = deepcopy(coverage)
+    coverage['reasons'].extend(r for r in rate.get('coverage', {}).get('reasons', [])
+                               if r['code'] == 'unpriced_usage')
+    partial = bool(coverage['reasons'])
+    coverage['state'] = 'partial' if partial else 'complete'
+    return {**deepcopy(rate), 'status': 'stale', 'coverage': coverage,
+            'partial': partial, 'detail': detail, 'indexing': indexing_state(coverage)}
 
 
 class LocalTokenBurn:
@@ -31,9 +57,12 @@ class LocalTokenBurn:
 
     def __init__(self, store, *, allowed=True, clock=time.time):
         self.store, self.allowed, self.clock = store, allowed, clock
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.sources = self.key = None
         self.value = None
+        self.coverage_key = self.coverage_value = None
+        self.coverage_expires = 0
+        self.coverage_clock = float('-inf')
 
     def decorate(self, snapshot):
         return {**snapshot, **self.read_rates()}
@@ -42,14 +71,29 @@ class LocalTokenBurn:
         return self.read_rates()["token_burn_rate"]
 
     def read_rates(self):
+        with self.lock:
+            try:
+                return self._read_rates()
+            except sqlite3.DatabaseError:
+                coverage = {'state': 'partial', 'checked_at': None, 'reasons': [reason('index_error')]}
+                state = dict(coverage=coverage, partial=True,
+                             detail='Local index unavailable. Open Sources or startup diagnostics for recovery.')
+                if self.value:
+                    return {kind: stale_estimate(rate, coverage, state['detail']) for kind, rate in self.value.items()}
+                return empty_local_rates(**state)
+
+    def _read_rates(self):
         if not self.allowed:
             return empty_local_rates()
         with self.lock, self.store.connect() as db:
             # The source health, revision and records must describe one index snapshot.
             db.execute("BEGIN")
-            sources = db.execute("""SELECT id,updated,status,
-                EXISTS(SELECT 1 FROM file_failures f WHERE f.source_id=s.id) AS failed
-                FROM sources s WHERE kind='folder' AND enabled=1 AND provider='codex'
+            from .projection_state import status
+            if not status(db)['readable']:
+                return empty_local_rates(coverage={'state': 'partial', 'checked_at': None,
+                    'reasons': [reason('coverage_unverified')]}, partial=True,
+                    detail='Updating usage index. Verifying the accepted configuration.')
+            sources = db.execute("""SELECT id,updated,status FROM sources s WHERE kind='folder' AND enabled=1 AND provider='codex'
                 AND NOT (status='Offline' AND updated IS NULL
                     AND NOT EXISTS(SELECT 1 FROM files f WHERE f.source_id=s.id))
                 ORDER BY id""").fetchall()
@@ -62,15 +106,21 @@ class LocalTokenBurn:
                 return empty_local_rates()
             at = self.clock()
             now = math.floor(at)
-            updates = [timestamp(row["updated"]) for row in sources]
             ready = any(row["status"] == "Ready" for row in sources)
-            fresh = [row["status"] == "Ready" and update is not None
-                     and 0 <= at - update.timestamp() <= self.stale_seconds
-                     for row, update in zip(sources, updates)]
-            updated = max((update.timestamp() for update in updates if update), default=None)
+            live = getattr(self.store, 'live_paths', None)
+            health_revision = db.execute('SELECT revision FROM coverage_state WHERE id=1').fetchone()[0]
+            metadata_revision = db.execute('SELECT revision FROM performance_state WHERE id=1').fetchone()[0]
+            coverage_key = (health_revision, metadata_revision, tuple(live.pending()) if live else (), ids)
+            if coverage_key != self.coverage_key or at >= self.coverage_expires or at < self.coverage_clock:
+                self.coverage_value = evaluate(db, sources, at, self.window_seconds, self.stale_seconds, live)
+                self.coverage_expires = self.coverage_value[0].pop('_expires_at', at + 1)
+                self.coverage_key = coverage_key
+            self.coverage_clock = at
+            coverage, fresh = self.coverage_value
+            updated = coverage['checked_at']
             revision = db.execute("SELECT value FROM settings WHERE key='data_revision'").fetchone()
-            partial = not all(fresh) or any(row["failed"] for row in sources)
-            key = (now, updated, revision[0] if revision else None, tuple(fresh), partial, ready)
+            partial = coverage['state'] != 'complete'
+            key = (now, updated, revision[0] if revision else None, json.dumps(coverage, sort_keys=True), ready)
             if key != self.key:
                 cutoff = datetime.fromtimestamp(now - self.window_seconds, timezone.utc).isoformat()
                 end = datetime.fromtimestamp(now, timezone.utc).isoformat()
@@ -89,18 +139,18 @@ class LocalTokenBurn:
                     detail = ("Waiting for a fresh local scan to finish."
                               if ready else "Local session folders are offline. Check Sources.")
                     if self.value:
-                        return {kind: {**rate, "status": "stale", "detail": detail}
+                        return {kind: stale_estimate(rate, coverage, detail)
                                 for kind, rate in self.value.items()}
-                    return empty_local_rates(updated, detail=detail,
+                    return empty_local_rates(updated, detail=detail, coverage=coverage,
                                              status="collecting" if ready else "unavailable")
                 common = {"status": "available", "observed_seconds": self.window_seconds,
-                          "updated_at": updated}
+                          "updated_at": updated, "coverage": coverage,
+                          'indexing': indexing_state(coverage)}
                 if partial:
-                    common.update(partial=True, detail="Some local sources have indexing errors or are not up to date. "
-                                  "This rate uses the indexed records and may be incomplete. Check Sources.")
+                    common.update(partial=True, detail=describe(coverage))
                 self.value = {
                     "token_burn_rate": {**common, "value": total * 60 / self.window_seconds},
                     "cost_burn_rate": cost_estimate(common, total, priced_tokens, cost, self.window_seconds),
                 }
                 self.key = key
-            return {kind: dict(rate) for kind, rate in self.value.items()}
+            return deepcopy(self.value)

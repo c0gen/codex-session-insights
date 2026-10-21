@@ -30,10 +30,24 @@ export interface Day {
 export interface UsageMetrics {
   cache_reuse_percent: number | null;
   reasoning_share_percent: number | null;
+  reasoning_share_basis?: {
+    reasoning_tokens: number;
+    output_tokens: number;
+    included_responses: number;
+    total_responses: number;
+  };
   cache_discount_usd: number | null;
   cache_discount_priced_tokens: number;
   cache_discount_total_tokens: number;
   cache_discount_coverage_percent: number | null;
+}
+export interface CacheRateDay {
+  day: string;
+  input_tokens: number;
+  cached_tokens: number;
+  observations: number;
+  input_available: number;
+  cached_available: number;
 }
 export interface DailySessions {
   day: string;
@@ -70,8 +84,11 @@ export interface Source {
   detail: string;
   segments: number;
   revision: number;
+  index_health?: { discovered_at: number | null; checked_at: number | null; error: string | null;
+    pending_files: number; file_errors: number; parse_gaps: number; next_retry_at: number | null };
 }
 export interface Job {
+  state?: "completed" | "cancelled" | "failed";
   id?: number;
   origin?: "automatic" | "user";
   cancelable?: boolean;
@@ -121,10 +138,14 @@ export interface Equivalents {
   floppy_disks: number;
 }
 export interface Dashboard {
+  cached_at?: string;
+  analytics_refreshing?: boolean;
+  loaded_view?: string;
   source_states?: Record<string, number>;
   summary: Summary;
   usage_metrics?: UsageMetrics;
   daily_sessions?: DailySessions[];
+  cache_rate_timeline?: CacheRateDay[] | null;
   timeline: Day[];
   projects: Project[];
   models: { name: string; tokens: number; cost: number | null }[];
@@ -146,6 +167,9 @@ export interface Dashboard {
     tokens?: { state: "complete" | "partial" | "unavailable"; sessions: number; recorded_sessions: number; reasoning?: string; metrics?: Record<string, { state: string; available: number; observations: number }> };
     edit_completion_time_unavailable?: number;
     conflicts: number;
+    awaiting_verification?: number;
+    identity_issues?: number;
+    accounting_overlaps?: number;
     parse_errors: number;
     replay_tokens: number;
     unresolved: number;
@@ -227,11 +251,17 @@ export interface ProjectMerge {
   completed_at: string;
 }
 export interface BurnRateEstimate {
+  indexing?: { live_checked_at: number | null; live_pending_files: number; historical_pending_files: number };
   value: number | null;
   status: "collecting" | "available" | "stale" | "unavailable";
   observed_seconds: number;
   updated_at: number | null;
   partial?: boolean;
+  coverage?: {
+    state: "complete" | "partial";
+    checked_at: number | null;
+    reasons: { code: string; label: string; count: number; source_id?: string; retry_at?: number }[];
+  };
   detail?: string;
   /** Present on dollar estimates once local usage has been indexed. */
   priced_tokens?: number;
@@ -290,5 +320,6 @@ export interface ProviderAllowance {
   check?: ProviderCheck;
 }
 export interface ProviderSetup { target: string; status: string; installed?: boolean; upgrade_available?: boolean; error?: string; configuration?: unknown; path?: string }
-export interface Dashboard { provider_allowances?: ProviderAllowance[]; provider_setup?: ProviderSetup[]; }
+export interface Dashboard { provider_allowances?: ProviderAllowance[]; provider_setup?: ProviderSetup[];
+  claude_recovery?: import('./claude-recovery').ClaudeRecovery; }
 export interface WidgetSummary { provider_allowances?: ProviderAllowance[]; }

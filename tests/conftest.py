@@ -30,3 +30,16 @@ def indexed(tmp_path):
     store=Store(tmp_path/'db');store.set_setting('timezone','America/New_York')
     sid=store.add_source(root)
     return store,root,sid
+
+
+def legacy_records(content):
+    """Construct a genuine pre-v6 payload, rather than just relabeling a manifest."""
+    from codex_insights.codec import loads, dumps
+    records = []
+    for line in content.splitlines():
+        fact = loads(line.decode('utf-8'))
+        fact = fact.get('accepted', fact)
+        fact.pop('record_hash', None)
+        fact.pop('record_proofs', None)
+        records.append(dumps(fact))
+    return ('\n'.join(records) + '\n').encode('utf-8')

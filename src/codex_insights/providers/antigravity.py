@@ -37,7 +37,7 @@ def merge_usage(left, right):
 
 
 class AntigravityParser(TranscriptParser):
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self, provider="antigravity", state=None, path=None, metadata=None):
         super().__init__(provider, state, path)

@@ -1,13 +1,15 @@
 """Remember failed file signatures and write diagnostics without session text."""
 import json
 import traceback
+import time
 from datetime import datetime, timezone
 
 from .parser import PARSER_VERSION
 
 
 class FileFailures:
-    def __init__(self, store, source_id, parser_version=None):
+    def __init__(self, store, source_id, parser_version=None, clock=time.time):
+        self.clock = clock
         self.parser_version = PARSER_VERSION if parser_version is None else parser_version
         self.store, self.source_id = store, source_id
         self.log = store.directory / "indexing-errors.jsonl"
@@ -15,14 +17,19 @@ class FileFailures:
             self.failed = {row["path"]: dict(row) for row in db.execute(
                 "SELECT * FROM file_failures WHERE source_id=?", (source_id,))}
         self.seen = set()
+        with store.connect() as db:
+            self.retries = {r['path']: dict(r) for r in db.execute(
+                'SELECT * FROM index_retries WHERE source_id=?', (source_id,))}
 
     def skip(self, path, stat, automatic):
         key = str(path)
         self.seen.add(key)
         failure = self.failed.get(key)
-        return bool(automatic and failure and failure["size"] == stat.st_size
+        unchanged = bool(automatic and failure and failure["size"] == stat.st_size
                     and failure["mtime"] == stat.st_mtime_ns
                     and failure["parser_version"] == self.parser_version)
+        retry = self.retries.get(key)
+        return unchanged and (retry is None or self.clock() < retry['next_retry_at'])
 
     def record(self, path, stat, error, offset=None):
         key = str(path)
@@ -47,6 +54,18 @@ class FileFailures:
             db.execute("INSERT OR REPLACE INTO file_failures VALUES(?,?,?,?,?,?,?,?)",
                        (self.source_id, key, failure["size"], failure["mtime"], self.parser_version,
                         failure["error_type"], diagnostic, stamp))
+            if isinstance(error, OSError):
+                previous = self.failed.get(key)
+                same = previous and all(previous.get(k) == failure[k] for k in ('size', 'mtime', 'parser_version'))
+                attempts = self.retries.get(key, {}).get('attempts', 0) + 1 if same else 1
+                retry = dict(path=key, attempts=attempts,
+                             next_retry_at=self.clock() + (5, 30, 120, 300)[min(attempts - 1, 3)])
+                db.execute('INSERT OR REPLACE INTO index_retries VALUES(?,?,?,?)',
+                           (self.source_id, key, attempts, retry['next_retry_at']))
+                self.retries[key] = retry
+            else:
+                db.execute('DELETE FROM index_retries WHERE source_id=? AND path=?', (self.source_id, key))
+                self.retries.pop(key, None)
         self.failed[key] = failure
 
     def clear(self, path):
@@ -54,7 +73,9 @@ class FileFailures:
         if key in self.failed:
             with self.store.lock, self.store.connect() as db:
                 db.execute("DELETE FROM file_failures WHERE source_id=? AND path=?", (self.source_id, key))
+                db.execute('DELETE FROM index_retries WHERE source_id=? AND path=?', (self.source_id, key))
             del self.failed[key]
+            self.retries.pop(key, None)
 
     def summarize(self, complete=False):
         if complete:

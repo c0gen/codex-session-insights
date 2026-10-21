@@ -1,6 +1,8 @@
 {
   "owner": "Replay accounting",
-  "bug_ids": ["B2"],
+  "bug_ids": [
+    "B2"
+  ],
   "outcome": "Scoped implementation and regression tests complete; automatic existing-index upgrade remains assigned to integration.",
   "changed_files": [
     "src/codex_insights/accounting/token_reconciliation.py",
@@ -35,6 +37,5 @@
     "Do not just bump bucket_version and rebuild buckets: that would aggregate the stale usage records without rerunning reconciliation. No B2 parser schema change, log rewrite, or snapshot rewrite is needed.",
     "Run combined validation after all owners finish; this chat only ran the assigned replay/accounting/engine suites."
   ],
-  "unresolved_issues": [],
-  "optional_notification": "notify_andy tools were not available in this chat; no external notification was sent."
+  "unresolved_issues": []
 }

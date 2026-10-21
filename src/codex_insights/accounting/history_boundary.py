@@ -32,18 +32,21 @@ def resolve_history_seed(session, index, visited=None):
         return None, error
     state = dict(seed or {})
     if "record_boundaries" in parent:
-        boundaries = dict(parent["record_boundaries"])
-        if offset and boundaries.get(offset) != ordinal - 1:
-            return None, "history_base_boundary_mismatch"
-        if offset == 0 and ordinal != 0:
-            return None, "history_base_boundary_mismatch"
-        for item in parent.get("boundaries", []):
-            if item["end_byte_offset"] > offset:
-                break
-            for field in ("model", "effort", "service_tier", "usage"):
-                if item.get(field) is not None:
-                    state[field] = item[field]
-        return state, None
+        # Byte offsets belong to physical versions, including equivalent JSON
+        # serializations. Test each compatible version without mixing boundaries.
+        for physical in [parent] + parent.get('_boundary_variants', []):
+            boundaries = dict(physical.get('record_boundaries', []))
+            if (offset and boundaries.get(offset) != ordinal - 1) or (offset == 0 and ordinal != 0):
+                continue
+            physical_state = dict(state)
+            for item in physical.get("boundaries", []):
+                if item["end_byte_offset"] > offset:
+                    break
+                for field in ("model", "effort", "service_tier", "usage"):
+                    if item.get(field) is not None:
+                        physical_state[field] = item[field]
+            return physical_state, None
+        return None, "history_base_boundary_mismatch"
     if not parent.get("_physical_path"):
         return None, "history_base_source_unavailable"
     consumed, last_ordinal = 0, None

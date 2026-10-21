@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ..parser import PARSER_VERSION, SessionParser
 from .transcripts import TranscriptParser
+from .claude_identity import PARSER_VERSION as CLAUDE_PARSER_VERSION
 
 LABELS = {"codex": "Codex", "claude_code": "Claude Code", "antigravity": "Antigravity"}
 
@@ -50,7 +51,9 @@ class Adapter:
             yield from sorted(root.rglob("*.jsonl"))
         else:
             import os
-            for base, dirs, names in os.walk(root):
+            def failed(error):
+                raise error
+            for base, dirs, names in os.walk(root, onerror=failed):
                 dirs[:] = [d for d in dirs if not d.startswith(".") or d == ".codex"]
                 for name in sorted(names):
                     if name.endswith(".jsonl") and not name.startswith("._"):
@@ -63,7 +66,8 @@ class Adapter:
                 "edits": "verified_only", "network": False}
 
 
-ADAPTERS = {p: Adapter(p, PARSER_VERSION if p == "codex" else 2 if p == 'antigravity' else TranscriptParser.VERSION) for p in LABELS}
+ADAPTERS = {p: Adapter(p, PARSER_VERSION if p == "codex" else
+                       CLAUDE_PARSER_VERSION if p == 'claude_code' else TranscriptParser.VERSION) for p in LABELS}
 
 
 def adapter(provider="codex"):

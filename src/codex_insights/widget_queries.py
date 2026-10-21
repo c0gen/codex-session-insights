@@ -20,6 +20,9 @@ class WidgetSummaries:
         with self.lock, self.store.connect() as db:
             # Both columns and their revision describe the same SQLite snapshot.
             db.execute("BEGIN")
+            from .projection_state import status
+            if not status(db)['readable']:
+                raise ValueError('Updating usage index. Waiting for the accepted configuration to be verified.')
             settings = {row[0]: json.loads(row[1]) for row in db.execute(
                 "SELECT key,value FROM settings WHERE key IN ('timezone','data_revision','bucket_version')")}
             zone_name = settings.get("timezone", "America/New_York")

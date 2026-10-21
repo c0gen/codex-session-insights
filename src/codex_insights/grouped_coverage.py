@@ -4,6 +4,23 @@ from collections import defaultdict
 METRICS = ('total', 'input', 'cached', 'writes', 'output', 'reasoning')
 
 
+def combine_providers(groups):
+    """Reuse the all-time aggregate for the identical unfiltered coverage view."""
+    metrics = {}
+    for name in METRICS:
+        available = sum(group['metrics'][name]['available'] for group in groups.values())
+        observations = sum(group['metrics'][name]['observations'] for group in groups.values())
+        metrics[name] = dict(state='unavailable' if not available else 'complete' if available == observations else 'partial',
+                             available=available, observations=observations)
+    sessions = sum(group['sessions'] for group in groups.values())
+    recorded = sum(group['recorded_sessions'] for group in groups.values())
+    state = metrics['total']['state']
+    if state == 'complete' and recorded < sessions:
+        state = 'partial'
+    return dict(state=state, sessions=sessions, recorded_sessions=recorded,
+                providers=[provider for group in groups.values() for provider in group['providers']], metrics=metrics)
+
+
 def coverage_groups(db, table, where, params, group):
     """Return the existing coverage shape plus total_tokens for each group.
 
@@ -15,10 +32,10 @@ def coverage_groups(db, table, where, params, group):
         raise ValueError('Unsupported metric table')
     if group == 'project':
         key = 'g.project_id'
-        joins = ' JOIN canonical c ON c.segment_id=r.segment_id JOIN project_sessions g ON g.segment_id=r.segment_id'
+        joins = ' JOIN session_metadata c ON c.segment_id=r.segment_id JOIN project_sessions g ON g.segment_id=r.segment_id'
     elif group == 'provider':
         key = 'r.provider'
-        joins = ' LEFT JOIN canonical c ON c.segment_id=r.segment_id'
+        joins = ' LEFT JOIN session_metadata c ON c.segment_id=r.segment_id'
     else:
         raise ValueError('Unsupported coverage group')
     count = 'r.event_count' if table == 'metric_buckets' else '1'

@@ -966,20 +966,47 @@ input[type="checkbox"] {
 .empty-state button {
   margin-top: 16px;
 }
+.background-status {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9;
+  width: min(480px, calc(100vw - 32px));
+  max-height: 40vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.background-status > :not([hidden]) {
+  pointer-events: auto;
+  box-shadow: 0 8px 28px #0005;
+}
+.background-status > p {
+  margin: 0;
+  padding: 11px 15px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #18242b;
+}
 .job-banner {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 11px 15px;
   border: 1px solid #36715e;
-  background: #173c3166;
+  background: #173c31;
   border-radius: 6px;
-  margin-bottom: 14px;
+  margin: 0;
   color: #c7ebdd;
 }
 .job-banner button {
   margin-left: auto;
+  flex-shrink: 0;
 }
+.job-banner .spinner { flex-shrink: 0; }
+.job-message { overflow-wrap: anywhere; }
 .coverage-note {
   padding: 12px 15px;
   background: #4b392533;

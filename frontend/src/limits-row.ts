@@ -1,3 +1,4 @@
+import { burnCoverageHelp, burnCoverageMarkup } from "./burn-coverage";
 import type { BurnRateEstimate, ProviderAllowance, ProviderBucket, UsageLimits } from "./types";
 import { remainingPercent, windowName } from "./allowance";
 import { compact, currency } from "./format";
@@ -58,9 +59,9 @@ function burnChip(limits: UsageLimits) {
     const numeric = rate!.value !== null && Number.isFinite(rate!.value);
     const value = rate!.status === "collecting" ? "Collecting…" : !numeric ? "Unavailable"
       : kind === "cost" ? `${rate!.value! > 0 && rate!.value! < 0.01 ? "<$0.01" : currency(rate!.value!)}/min` : `${compact(rate!.value!)} tokens/min`;
-    const help = `${kind === "cost" ? "Local dollar burn: API-equivalent USD per minute, not a subscription bill" : "Local token burn: tokens per minute"} from enabled local Codex session folders. Five-minute trailing estimate.${rate!.status === "stale" ? " Stale." : ""}`;
+    const help = `${kind === "cost" ? "Local dollar burn: API-equivalent USD per minute, not a subscription bill" : "Local token burn: tokens per minute"} from enabled local Codex session folders. Five-minute trailing estimate. ${burnCoverageHelp(rate!)}`;
     // Stable ids let a full dashboard redraw restore keyboard focus (live-updates.ts).
-    return `<span id="limits-burn-${kind}" class="burn-rate burn-rate-${kind}" data-status="${esc(rate!.status)}" tabindex="0" title="${esc(help)}" aria-label="${esc(`${help} ${value}.`)}"><strong>${esc(value)}</strong></span>`;
+    return `<span id="limits-burn-${kind}" class="burn-rate burn-rate-${kind}" data-status="${esc(rate!.status)}" tabindex="0" title="${esc(help)}" aria-label="${esc(`${help} ${value}.`)}"><strong>${esc(value)}</strong>${burnCoverageMarkup(rate!, `limits-burn-${kind}`)}</span>`;
   });
   return parts.length ? `<div class="limit-burn"><span>Local burn</span>${parts.join('<span aria-hidden="true">·</span>')}</div>` : "";
 }

@@ -53,6 +53,8 @@ def test_native_steps_deduplicate_and_preserve_unknown_components(tmp_path):
     assert len(fact['messages']) == 2
     assert 'PRIVATE_TEXT' not in str(unpack(pack(fact)))
     validate_fact(fact)
+    fact.pop('record_hash', None)
+    fact.pop('record_proofs', None)
     with pytest.raises(ValueError, match='v4'):
         validate_fact(fact, 3)
 
@@ -109,7 +111,7 @@ def test_hook_metadata_and_v4_private_transfer(tmp_path):
     export_snapshot(store, archive)
     with zipfile.ZipFile(archive) as bundle:
         raw = bundle.read('facts.jsonl')
-        assert json.loads(bundle.read('manifest.json'))['format_version'] == 5
+        assert json.loads(bundle.read('manifest.json'))['format_version'] == 6
         assert all(value not in raw for value in (b'PRIVATE_TEXT', b'C:/private', b'transcriptPath', b'workspacePaths'))
     target = Store(tmp_path / 'imported')
     import_snapshot(target, archive)
@@ -177,6 +179,10 @@ def test_retained_legacy_facts_survive_refresh_and_import(tmp_path, transfer_ver
     if transfer_version == 3:
         with zipfile.ZipFile(archive_path) as bundle:
             manifest = json.loads(bundle.read('manifest.json')); raw = bundle.read('facts.jsonl')
+        from conftest import legacy_records
+        import hashlib
+        raw = legacy_records(raw)
+        manifest['facts_sha256'] = hashlib.sha256(raw).hexdigest()
         manifest['format_version'] = 3
         with zipfile.ZipFile(archive_path, 'w') as bundle:
             bundle.writestr('manifest.json', json.dumps(manifest)); bundle.writestr('facts.jsonl', raw)

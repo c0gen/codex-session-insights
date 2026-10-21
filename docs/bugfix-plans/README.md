@@ -2,7 +2,7 @@
 
 Fix the six reproduced review findings in the current desktop app while preserving existing features and uncommitted work. Four implementation owners work on separate files. A fifth owner integrates the fixes, repairs existing indexed data where needed, and verifies the complete app.
 
-All five chats use GPT-6 Astra with Medium reasoning. The parent chat is 01a128c9-c881-78a2-b158-ec9d235ffa27. The app root is E:/Codex/2026-05-24/codex-session-insights-c-users-andyc/desktop-app.
+All five chats use GPT-6 Astra with Medium reasoning. Paths in these plans are relative to the repository root unless stated otherwise. Keep live chat/project identifiers and machine-specific paths in ignored `.local-data/planning/` records, not in committed planning documents.
 
 ## Scope and assignments
 
@@ -20,7 +20,7 @@ New metrics and unrelated improvements remain outside this repair pass. Refactor
 
 The repository already contains substantial uncommitted and untracked work. Preserve it. Work directly in the current checkout; do not create a worktree from an older commit or reset any files. No commits, releases, or production data mutations are requested.
 
-Another user-owned chat, "Add token burn rate metric" (01a128b7-6eac-7683-a3e2-b14cfd991ccd), is active in this checkout. Its work includes account_monitor.py, burn_rates.py, local_token_burn.py, service.py, account-types.ts, burn-rate.ts, accounts.css, and views/accounts.ts. Read its compact status when overlapping work becomes necessary, do independent work while it runs, and wait for it to finish before editing those overlapping modules. Do not message or steer that unrelated chat. The integration owner must preserve and test its final changes.
+Another user-owned chat, "Add token burn rate metric", is active in this checkout. Its work includes account_monitor.py, burn_rates.py, local_token_burn.py, service.py, account-types.ts, burn-rate.ts, accounts.css, and views/accounts.ts. Read its compact status when overlapping work becomes necessary, do independent work while it runs, and wait for it to finish before editing those overlapping modules. Do not message or steer that unrelated chat. The integration owner must preserve and test its final changes.
 
 Implementation owners must not edit another active owner's files. Add separate regression test files instead of concurrently modifying shared conftest.py or broad existing test files. The integration owner may reconcile cross-cutting changes after all implementation owners finish. Reread current files before applying patches.
 

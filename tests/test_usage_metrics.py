@@ -57,11 +57,13 @@ def test_aggregate_partial_unknown_zero_and_record_bucket_parity(indexed,monkeyp
     write_usage(root,'known','fixture',usage)
     refresh(store)
     expected=dict(cache_reuse_percent=60,reasoning_share_percent=25,cache_discount_usd=1.08,cache_discount_priced_tokens=600000,cache_discount_total_tokens=600000,cache_discount_coverage_percent=100)
+    expected['reasoning_share_basis'] = dict(reasoning_tokens=50000, output_tokens=200000, included_responses=1, total_responses=1)
     assert dashboard(store)['usage_metrics']==expected
     write_usage(root,'unknown','unpublished',usage)
     refresh(store)
     partial=dashboard(store)['usage_metrics']
-    assert partial=={**expected,'cache_discount_total_tokens':1200000,'cache_discount_coverage_percent':50}
+    assert partial=={**expected,'cache_discount_total_tokens':1200000,'cache_discount_coverage_percent':50,
+        'reasoning_share_basis': dict(reasoning_tokens=100000, output_tokens=400000, included_responses=2, total_responses=2)}
     store.set_setting('bucket_version',None)
     assert dashboard(store)['usage_metrics']==partial
     unknown=dashboard(store,{'model':'unpublished'})['usage_metrics']
@@ -171,6 +173,7 @@ def test_report_retains_public_metrics_without_private_fields(indexed,tmp_path,m
     payload=json.loads(html.split('window.__INSIGHTS_REPORT__=',1)[1].split(';</script>',1)[0])
     assert payload['usage_metrics']==data['usage_metrics']
     assert payload['daily_sessions']==data['daily_sessions']
+    assert payload['cache_rate_timeline']==data['cache_rate_timeline']
     assert set(payload['daily_sessions'][0])=={'day','chats','subagents','system_agents'}
     assert 'PRIVATE PROMPT' not in html
     assert str(root) not in html
@@ -183,16 +186,17 @@ def test_dashboard_metrics_share_read_snapshot(indexed,monkeypatch):
     refresh(store)
     expected=dashboard(store)
     original=queries.query_usage_metrics
-    def concurrent_update(db,table,where,params,summary):
+    def concurrent_update(db,table,where,params,summary,discount=None):
         with store.connect() as writer:
             for name in ('records','metric_buckets'):
-                writer.execute(f"UPDATE {name} SET cache_discount=9 WHERE kind='usage'")
+                writer.execute(f"UPDATE {name} SET cache_discount=9,input=9999,cached=99 WHERE kind='usage'")
             writer.execute("UPDATE settings SET value=? WHERE key='data_revision'",(json.dumps(expected['revision']+1),))
-        return original(db,table,where,params,summary)
+        return original(db,table,where,params,summary,discount)
     monkeypatch.setattr(queries,'query_usage_metrics',concurrent_update)
     observed=dashboard(store)
     assert observed['usage_metrics']==expected['usage_metrics']
     assert observed['daily_sessions']==expected['daily_sessions']
+    assert observed['cache_rate_timeline']==expected['cache_rate_timeline']
     assert observed['revision']==expected['revision']
 
 def test_reconciled_discount_excludes_replay_and_copied_sources(indexed,tmp_path):
@@ -212,4 +216,6 @@ def test_reconciled_discount_excludes_replay_and_copied_sources(indexed,tmp_path
     assert data['usage_metrics']['cache_discount_total_tokens']==75
     assert data['usage_metrics']['cache_discount_priced_tokens']==75
     assert data['usage_metrics']['cache_discount_usd']==pytest.approx(75*1.575/1000000)
+    assert sum(row['cached_tokens'] for row in data['cache_rate_timeline']) == 75
+    assert sum(row['input_tokens'] for row in data['cache_rate_timeline']) == 150
     assert data['daily_sessions']==[dict(day='2026-10-01',chats=1,subagents=1,system_agents=0)]

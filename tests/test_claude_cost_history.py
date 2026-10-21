@@ -99,6 +99,9 @@ def make_old_index(store):
                     for key in ("service_tier", "speed", "inference_geo"):
                         item.pop(key, None)
                 db.execute("UPDATE " + table + " SET fact=? WHERE rowid=?", (pack(fact), row["rowid"]))
+        # Pre-v6 indexes had no retained variant table; remove today's richer
+        # evidence so the fixture actually represents that historical index.
+        db.execute("DELETE FROM history_variants")
         db.execute("UPDATE files SET parser_version=1")
         db.execute("UPDATE candidates SET parser_version=1")
         db.execute("UPDATE records SET cost=NULL,priced=0,cache_discount=NULL,cache_priced=0")
@@ -126,7 +129,7 @@ def test_offline_repricing_then_local_metadata_backfill_is_automatic(tmp_path):
     assert refresh(store)["bytes_read"] == 0
 
 
-def test_v5_roundtrip_preserves_modifiers_and_old_metadata_is_rejected(tmp_path):
+def test_v6_roundtrip_preserves_modifiers_and_old_metadata_is_rejected(tmp_path):
     store, _, _, _ = indexed(tmp_path, line(speed="fast", inference_geo="us", service_tier="standard"))
     snapshot = tmp_path / "claude.codex-insights"
     export_snapshot(store, snapshot)
@@ -134,10 +137,12 @@ def test_v5_roundtrip_preserves_modifiers_and_old_metadata_is_rejected(tmp_path)
     import_snapshot(target, snapshot)
     assert dashboard(target)["summary"]["cost"] == 17.25
     with zipfile.ZipFile(snapshot) as bundle:
-        assert json.loads(bundle.read("manifest.json"))["format_version"] == 5
+        assert json.loads(bundle.read("manifest.json"))["format_version"] == 6
     with target.connect() as db:
         fact = unpack(db.execute("SELECT fact FROM canonical").fetchone()[0])
     assert fact["raw_token_trace"][0]["inference_geo"] == "us"
+    fact.pop("record_hash", None)
+    fact.pop("record_proofs", None)
     for version in (2, 3, 4):
         with pytest.raises(ValueError, match="requires transfer v5"):
             validate_fact(deepcopy(fact), version)
@@ -156,6 +161,8 @@ def test_old_claude_transfers_still_import_and_reprice(tmp_path, version):
     with zipfile.ZipFile(snapshot) as bundle:
         manifest = json.loads(bundle.read("manifest.json"))
         facts = bundle.read("facts.jsonl")
+    from conftest import legacy_records
+    facts = legacy_records(facts)
     manifest["format_version"] = version
     manifest["facts_sha256"] = hashlib.sha256(facts).hexdigest()
     older = tmp_path / "older.codex-insights"

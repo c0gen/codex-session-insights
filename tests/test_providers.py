@@ -123,7 +123,7 @@ def test_mixed_transfer_roundtrip_and_privacy(tmp_path):
     archive = tmp_path / "usage.codex-insights"
     export_snapshot(store, archive)
     with zipfile.ZipFile(archive) as bundle:
-        assert json.loads(bundle.read("manifest.json"))["format_version"] == 5
+        assert json.loads(bundle.read("manifest.json"))["format_version"] == 6
         facts = bundle.read("facts.jsonl")
         for marker in (b"PRIVATE", b"C:/private", b"rate_limits", b"used_percentage"):
             assert marker not in facts
@@ -146,6 +146,10 @@ def test_v1_remains_codex_and_exporter_identity_survives(tmp_path):
     with zipfile.ZipFile(archive) as bundle:
         manifest = json.loads(bundle.read("manifest.json"))
         facts = bundle.read("facts.jsonl")
+    from conftest import legacy_records
+    import hashlib
+    facts = legacy_records(facts)
+    manifest["facts_sha256"] = hashlib.sha256(facts).hexdigest()
     manifest["format_version"] = 1
     v1 = tmp_path / "v1.zip"
     with zipfile.ZipFile(v1, "w") as bundle:
@@ -305,6 +309,7 @@ def test_codex_account_burn_does_not_include_other_provider_tokens(tmp_path):
     refresh(store)
     with store.connect() as db:
         db.execute("UPDATE sources SET updated=?,status='Ready'", (NOW.isoformat(),))
+        db.execute("UPDATE index_health SET discovered_at=?,checked_at=?", (NOW.timestamp(), NOW.timestamp()))
     value = LocalTokenBurn(store, clock=lambda: NOW.timestamp()).read()
     assert value["value"] == 0
 
@@ -318,6 +323,10 @@ def test_additive_provider_schema_migration_retains_codex_accounting(tmp_path):
     exporter = store.setting("exporter_id")
     with store.connect() as db:
         db.execute("DROP INDEX records_provider")
+        # This fixture represents a schema that predates the metadata projection.
+        for trigger in ('metadata_insert', 'metadata_update', 'metadata_delete'):
+            db.execute('DROP TRIGGER IF EXISTS ' + trigger)
+        db.execute("DELETE FROM settings WHERE key='hot_metadata_version'")
         for table in ("sources", "records", "candidates", "canonical", "metric_buckets"):
             db.execute("ALTER TABLE " + table + " DROP COLUMN provider")
         db.execute("UPDATE settings SET value='2' WHERE key='projection_version'")

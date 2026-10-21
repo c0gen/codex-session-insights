@@ -7,6 +7,8 @@ from .accounting.change_accounting import event_signature
 from .accounting.pricing import estimate_token_cost
 from .accounting.token_reconciliation import reconcile_sessions
 from .codec import digest, unpack
+from .copy_store import variants
+from .copy_reconciliation import compatible
 from .buckets import update_segment
 from .project_groups import register_session
 from .session_presence import SessionPresence
@@ -15,7 +17,7 @@ MIN = datetime.min.replace(tzinfo=timezone.utc)
 MAX = datetime.max.replace(tzinfo=timezone.utc)
 # Separate from parser/bucket versions: imported and offline facts also need
 # replay reconciliation rerun when its rules change.
-PROJECTION_VERSION = 5
+PROJECTION_VERSION = 6
 COLUMNS = ("event_id segment_id session_id source_id project_id kind ts day hour weekday model effort tier total input cached writes output reasoning cost priced prompts added removed unknown unsupported unknown_size resolved_at cache_discount cache_priced provider").split()
 KNOWN_COLUMNS = ['known_' + name for name in ('total', 'input', 'cached', 'writes', 'output', 'reasoning')]
 COLUMNS += KNOWN_COLUMNS + ['completion_unavailable']
@@ -29,19 +31,35 @@ class Lineage:
         if sid not in self.cache:
             row = self.db.execute("SELECT fact FROM canonical WHERE session_id=? ORDER BY trace_count DESC,segment_id LIMIT 1", (sid,)).fetchone()
             self.cache[sid] = unpack(row[0]) if row else None
+            if row:
+                fact = self.cache[sid]
+                fact['_boundary_variants'] = [v['fact'] for v in variants(self.db, fact['segment_id'])
+                                               if compatible(fact, v['fact'])]
         return self.cache[sid] or default
 
 
 def project_segments(store, db, segments, progress=None):
+    segments = sorted(segments)
     timezone_name = store.setting("timezone", "America/New_York")
     zone = ZoneInfo(timezone_name)
     fast = store.setting("assumed_fast_percent", 0) / 100
+    from .pricing_catalog import parse_catalog
+    catalog = store.setting('pricing_catalog')
+    rate_records = parse_catalog(catalog) if catalog is not None else None
     lineage = Lineage(db)
     presence = SessionPresence(db)
     from .providers.reconciliation import accounting_segments, response_owners, slices
     from .providers.pricing import estimate
-    owners = response_owners(db)
-    suppressed = accounting_segments(db)
+    from .history_overlaps import groups as overlap_groups
+    from .hot_metadata import accounting_dependencies, update_overlaps
+    context_segments = accounting_dependencies(db, segments)
+    provider_sessions = {row[0] for sid in context_segments for row in db.execute(
+        "SELECT session_id FROM session_metadata WHERE segment_id=? AND provider!='codex'", (sid,))}
+    overlaps = overlap_groups(db, session_ids=provider_sessions)
+    update_overlaps(db, provider_sessions, overlaps)
+    suppressed = set().union(*(g['suppressed'] for g in overlaps))
+    owners = response_owners(db, segments, suppressed)
+    overlap_states = {sid: g['state'] for g in overlaps for sid in g['suppressed']}
     for index, segment_id in enumerate(segments):
         if progress and index % 100 == 0:
             progress({"phase": "Correcting stored usage", "sessions": index, "total_sessions": len(segments)})
@@ -56,6 +74,7 @@ def project_segments(store, db, segments, progress=None):
             update_segment(db, segment_id)
             diagnostic = json.loads(row['diagnostic'] or '{}')
             diagnostic['accounting_overlap'] = 'legacy_identity_overlap'
+            diagnostic['accounting_overlap_state'] = overlap_states[segment_id]
             db.execute('UPDATE canonical SET diagnostic=? WHERE segment_id=?', (json.dumps(diagnostic), segment_id))
             continue
         provider = fact.get("provider", "codex")
@@ -80,7 +99,8 @@ def project_segments(store, db, segments, progress=None):
             usage = item["usage"]
             price = estimate_token_cost(item.get("model"), usage, service_tier=item.get("service_tier"),
                 service_tier_logged=bool(item.get("service_tier")), assumed_fast_share=fast,
-                at=item["timestamp"], request_input_tokens=item.get("request_input_tokens")) if provider == 'codex' else estimate(item)
+                at=item["timestamp"], request_input_tokens=item.get("request_input_tokens"),
+                rate_records=rate_records) if provider == 'codex' else estimate(item)
             if fact.get('snapshot_mode') == 'complete_binary':
                 from .providers.legacy.pricing import estimate as legacy_estimate
                 price = legacy_estimate(item)
@@ -145,15 +165,31 @@ def project_segments(store, db, segments, progress=None):
         last = max(fact.get("activity", []) or [fact["metadata_timestamp"]])
         diagnostic = json.loads(row["diagnostic"] or "{}")
         diagnostic.pop('accounting_overlap', None)
+        diagnostic.pop('accounting_overlap_state', None)
         diagnostic.update(accounting=fact.get("token_reconciliation_method"),
                           replay_tokens=fact.get("verified_replay_usage", {}).get("total_tokens", 0))
         diagnostic['edit_completion_time_unavailable'] = sum(e['outcome'] == 'confirmed' and e.get('resolved_at') is None for e in fact.get('change_events', []))
         if fact.get('provenance'):
             diagnostic['provenance'] = fact['provenance']
         db.execute("UPDATE canonical SET last_active=?,diagnostic=? WHERE segment_id=?", (last.isoformat(), json.dumps(diagnostic), segment_id))
+    db.executemany('DELETE FROM projection_queue WHERE segment_id=?', [(sid,) for sid in segments])
+    db.executemany('DELETE FROM projection_dependencies WHERE segment_id=?', [(sid,) for sid in segments])
 
 
 def rebuild_projection(store, progress=None):
+    if getattr(store, '_staging_projection', False):
+        return
+    from . import projection_state
+    with store.lock, store.connect() as db:
+        staged = bool(getattr(store, 'cooperate', None) or projection_state.status(db)['pending'])
+        projection_state.request(db)
+    if staged:
+        from .staged_projection import rebuild
+        store._staging_projection = True
+        try:
+            return rebuild(store, project_segments, PROJECTION_VERSION, progress)
+        finally:
+            store._staging_projection = False
     with store.lock, store.connect() as db:
         db.execute("BEGIN IMMEDIATE")
         segments = [r[0] for r in db.execute("SELECT segment_id FROM candidates UNION SELECT segment_id FROM canonical")]
@@ -170,12 +206,14 @@ def rebuild_projection(store, progress=None):
         db.execute("INSERT OR REPLACE INTO settings VALUES('data_revision',?)", (json.dumps(revision),))
         db.execute("DELETE FROM projection_queue")
         db.execute("INSERT OR REPLACE INTO settings VALUES('projection_version',?)", (json.dumps(PROJECTION_VERSION),))
+        projection_state.publish(db)
+    projection_state.activate(store)
 
 
 def ensure_projection(store, progress=None):
     """Upgrade stored facts atomically, retrying after an interrupted rebuild."""
-    with store.lock:
-        if store.setting("projection_version") == PROJECTION_VERSION:
-            return False
-        rebuild_projection(store, progress)
-        return True
+    from .projection_state import needs_rebuild
+    if not needs_rebuild(store, PROJECTION_VERSION):
+        return False
+    rebuild_projection(store, progress)
+    return True

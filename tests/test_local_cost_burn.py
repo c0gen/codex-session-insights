@@ -16,6 +16,7 @@ def stamp(at):
 def scanned(store, at):
     with store.connect() as db:
         db.execute("UPDATE sources SET updated=?,status='Ready' WHERE kind='folder'", (stamp(at),))
+        db.execute("INSERT OR REPLACE INTO index_health SELECT id,?,?,NULL FROM sources WHERE kind='folder'", (at, at))
 
 
 @pytest.fixture
@@ -58,7 +59,9 @@ def test_cost_window_uses_same_scope_boundaries_and_idle_minutes_as_tokens(local
     result = reader.read_rates()
     assert result["token_burn_rate"]["value"] == 400
     assert result["cost_burn_rate"] == dict(value=.3, status="available", observed_seconds=300,
-                                           updated_at=clock[0], total_tokens=2000, priced_tokens=2000)
+                                           updated_at=clock[0], total_tokens=2000, priced_tokens=2000,
+                                           coverage=dict(state="complete", checked_at=clock[0], reasons=[], historical_pending_files=0, live_pending_files=0),
+                                           indexing=dict(live_checked_at=clock[0], historical_pending_files=0, live_pending_files=0))
     clock[0] += 300
     scanned(store, clock[0])
     # The previously future-dated event is now in range.

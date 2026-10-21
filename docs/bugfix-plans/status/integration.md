@@ -23,14 +23,16 @@ The user's report that GUI launch stayed busy without a window exposed a pre-win
 
 ## Validation
 
-- Full final Python suite: `.venv/Scripts/python.exe -m pytest -q --basetemp=.local-data/integration-final-startup-01a128d4` — **258 passed in 51.82s**. Includes six new upgrade/startup tests and all account, local burn-rate, ingestion, replay, source/transfer, desktop, widget and summary-image tests.
+Scratch directory names below are anonymized; the recorded test results are unchanged.
+
+- Full final Python suite: `.venv/Scripts/python.exe -m pytest -q --basetemp=.local-data/integration-final-startup-run` — **258 passed in 51.82s**. Includes six new upgrade/startup tests and all account, local burn-rate, ingestion, replay, source/transfer, desktop, widget and summary-image tests.
 - Production frontend: `npm run build` in `frontend` — TypeScript, dashboard Vite build and widget Vite build passed.
 - `node scripts/qa_token_activity_data.mjs` — passed calendar gaps, leap years, DST, range and shared summary-image date checks.
 - `node scripts/qa_filter_state_unit.mjs` and `node scripts/qa_account_identity.mjs` — passed.
 - Headless Edge against production assets and an isolated demo server: `qa_ui.mjs` with an actual standalone HTML report; `qa_filter_state.mjs` using the production URL; `qa_token_kpi.mjs`; `qa_summary_images.mjs`; `qa_accounts.mjs`; `qa_live_updates.mjs`; `qa_merges_allowance.mjs`; and `qa_widget.mjs` — all passed.
 - Windows native prerequisite check and hidden demo GUI smoke — passed. Updated native smoke confirms Overview, canvas, bridge and a running maintenance job together.
 - `./scripts/check_desktop.ps1 -WidgetOnly` — passed normal native startup, tray close/reopen, relaunch activation, settings, all metric combinations, native widget scaling from 100–200%, account rows, menus, positioning, tray failure recovery and clean exit. Image clipboard checks were intentionally skipped.
-- Relevant diff whitespace check — passed. Final dashboard screenshot inspected; QA artifacts are under `.local-data/integration-01a128d4`, and native controller evidence is under `.local-data/desktop-check-4b1ee89878ae4203aee884d310500bd3`.
+- Relevant diff whitespace check — passed. Final dashboard screenshot inspected; QA artifacts are under `.local-data/integration-run`, and native controller evidence is under `.local-data/desktop-check-run`.
 
 Initial sandbox restrictions prevented Vite realpath resolution and browser access to the sandboxed server. Approved local retries resolved those environment failures. One new KPI expectation was corrected from `1.0K` to the existing `1K` format. A summary-image fixture declaring custom dates without start/end was corrected to satisfy the validated response contract. All final runs above passed after those adjustments. Both isolated demo servers and all native test processes exited; `docs/dashboard.png` was not overwritten by integration.
 
@@ -57,4 +59,3 @@ Integration changed:
 - HTML reports capture applied filters and query the index at export time; they do not freeze the entire displayed data revision while the dialog is open.
 - GUI cached totals may be shown during the visible upgrade job. Final corrected records become visible after its atomic commit.
 - Windows source-mode native behavior was tested. Packaged EXE behavior, macOS packages, and persistent native image clipboard behavior were not validated in this pass. No real account provider, real credentials, original session logs, or real user index was used for acceptance.
-- Optional notify_andy tools were unavailable; no external notification was sent.

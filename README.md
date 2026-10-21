@@ -4,6 +4,8 @@ A small local dashboard for the wonderfully unreasonable amount of text you put 
 
 ![Dashboard with synthetic demo data](docs/dashboard.png)
 
+Startup now opens the shell before index maintenance and shows a dated cached overview while refreshing. Live indexing takes priority during historical work, and coverage distinguishes historical backlog from current uncertainty. See [implementation, measurements, SQLite packaging requirements, and remaining release gates](docs/release-performance.md).
+
 ## Get the app
 
 Download the latest assets from [Releases](https://github.com/c0gen/codex-session-insights/releases/latest).
@@ -28,9 +30,11 @@ Each snapshot is a complete compressed set of usage facts, including timestamps,
 
 **Export usage** refreshes enabled local sources before saving, with separate refresh/export progress and cancellation. Unreadable files and disconnected sources retain their last accepted history; **Export saved with warnings** stays visible on Sources when the latest activity could not be checked. The CLI `export` command returns the same refresh statistics and warnings. Cancelling before publication or a failed write leaves an existing destination unchanged.
 
-Update the Windows dashboard before importing new Mac snapshots: exports use **transfer v5**, while the updated dashboard continues to import v1–v4. Both apps share Claude API-equivalent pricing; snapshots preserve counters, cache-write durations and logged tier/speed/geography, and the receiving dashboard calculates cost from those facts. Older snapshots can be repriced from available facts, but recovering omitted metadata requires rescanning and exporting on the original computer. After replacing the Mac app, use **Update** on any app-owned provider bridge that offers it. A missing bundled bridge shows a setup diagnostic without blocking transcript scans or exports.
+Update the Windows dashboard before importing new Mac snapshots: exports use **transfer v6**, while the updated dashboard continues to import v1–v5. Both apps share Claude API-equivalent pricing; snapshots preserve counters, cache-write durations and logged tier/speed/geography, and the receiving dashboard calculates cost from those facts. Older snapshots can be repriced from available facts, but recovering omitted metadata requires rescanning and exporting on the original computer. After replacing the Mac app, use **Update** on any app-owned provider bridge that offers it. A missing bundled bridge shows a setup diagnostic without blocking transcript scans or exports.
 
-Copied sessions count once. A verified longer prefix replaces a shorter copy. Divergent copies retain one accepted history and show a coverage diagnostic. An unplugged drive retains its indexed contribution. “Forget indexed history” removes that source’s contribution without changing the original sessions.
+Copied sessions count once. Byte prefixes and ordered normalized JSON records prove copies and extensions, including different spacing/key order. Divergent histories retain every sanitized alternative. **Review conflicts** shows each version and lets you keep the accepted history, select another, or undo a selection; choices survive refreshes and restarts. New incompatible activity reopens review. Accepted totals may exclude activity in alternatives. An unplugged drive retains its indexed contribution. “Forget indexed history” removes that source’s contribution without changing the original sessions.
+
+Version 0.1.6 automatically backs up and repairs proven Claude agent identity collisions, including flat and workflow transcripts. Sources reports newly included usage and remaining verification issues. Recorded counters across conflicting versions can overlap. Recover the Mac's existing index and re-export to restore alternatives omitted by older snapshots; see the [Claude recovery and audit guide](docs/claude-identity-recovery.md).
 
 ## Antigravity integration
 
@@ -40,7 +44,7 @@ Enable **Check Antigravity allowance** in Settings after installing and signing 
 
 ## What the numbers mean
 
-- **Total tokens (dashboard):** reported lifetime tokens from enabled Codex accounts, counting confirmed duplicate sign-ins once, plus all-time indexed Claude Code and Antigravity usage from enabled sources. This total is independent of tool, date, project, model and source filters; **Analyzed tokens in this view** follows those filters. If no Codex lifetime counter is available, the headline uses indexed Codex usage and shows **Indexed Codex fallback**. A reported zero is valid; missing or unverified account coverage is marked partial, and cached failures show stale. The widget, charts, copied images and offline reports continue to use analyzed usage after response-counter and verified copied-history reconciliation, including repeated context and cached input.
+- **Total tokens (dashboard):** reported lifetime tokens from enabled Codex accounts, counting confirmed duplicate sign-ins once, plus all-time indexed Claude Code and Antigravity usage from enabled sources. This total is independent of tool, date, project, model and source filters; **Analyzed tokens in this view** follows those filters. If no Codex lifetime counter is available, the headline uses indexed Codex usage and shows **Indexed Codex fallback**. A reported zero is valid; missing or unverified account coverage is marked partial, and cached failures show stale. The widget, charts, summary images and offline reports continue to use analyzed usage after response-counter and verified copied-history reconciliation, including repeated context and cached input.
 - **API-equivalent cost:** a token-price estimate in USD, using verified request-date model rates. Claude Opus 5.5 history is priced from September 22, 2026, and Sonnet 5.5 from September 28, with separate uncached input, cached reads, five-minute/one-hour cache writes and output. Logged Claude speed, service tier and inference geography apply supported modifiers; missing speed/tier assumes Standard and missing/unavailable geography assumes global. Other Claude models retain their existing verified windows. The assumed Fast share applies only to Codex. Unknown models, unsupported modifiers and missing cache-write duration remain unpriced and reduce displayed coverage. Startup reprices stored facts; the next local scan backfills pricing metadata. It is not a subscription bill and excludes non-token tool/service charges.
 - **Observed lines:** confirmed patch additions/removals visible in logs, including structured file-change completions in recent sessions. The dashboard also shows total changed lines: additions plus removals under the active filters. Recorded deletion contents supply removed-line counts when available. Repeated edits count; shell writes and missing results produce partial coverage. This is not the final Git diff or a productivity score.
 - **Main chats:** distinct main chat IDs with recorded activity in the selected range. Agents have their own usage breakdown.
@@ -48,7 +52,13 @@ Enable **Check Antigravity allowance** in Settings after installing and signing 
 
 Useful views are daily activity, model usage, token composition, prompt timing, and a project table. No quality score, inferred success rate, personality analysis, environmental estimate, or made-up time saved. See [metric review](docs/metrics.md) and [app specification](docs/spec.md).
 
+**Visualizations** adds five interactive Token Worlds: Paper Tower, Infinite Library, Paper Trail, Reading Journey and Floppy Vault. Use **Explore in 3D** on Overview, compare real dimensions, switch units or paper proportions, and copy/save the current exhibit as a PNG. Saved HTML reports include all five scenes and their static fallbacks, without model downloads. See [Token Worlds calculations, assets and validation](docs/token-worlds.md).
+
+The library grows with the actual novel equivalent: 150 books per bookcase, with selectable aisles and a partial final book. The vault uses fixed-capacity cases and racks. Paper callouts keep the top visible, trails offer an unrolled or globe view, and reading schedules show continuous reading or 30/60 minutes per day.
+
 **Usage & Cost** also shows **Cache reuse rate** (cached reads divided by input), **Reasoning share** (reasoning divided by output), and **Estimated cache discount** (cached reads multiplied by the difference between effective uncached and cached input prices). Ratios use aggregate counters; zero denominators or invalid subsets show Unavailable. The discount uses the same historical, tier, context and assumed-Fast rates as cost accounting, keeps cache-write charges unchanged, and is an API-equivalent estimate rather than subscription savings. Partial estimates show cached-token pricing coverage; no applicable prices show Unavailable, no cached reads show $0 with coverage not applicable, and negative differences remain visible as surcharges.
+
+**Cache reuse rate over time** adds daily and token-weighted weekly trends below the Usage & Cost cards, with exact counters, gap explanations and 90-period paging. Weekly buckets follow Monday–Sunday and the selected dates. **Reasoning share** now uses only responses recording both reasoning and output counters, labels partial coverage as **Recorded subset**, and explains when no usable ratio exists. Both work in offline HTML reports.
 
 The **Chats and agents per day** chart counts distinct active main chats, spawned sub-agents and system agents separately. A multi-day session counts once on each active day, even without token usage; these are not new-chat counts and daily counts do not sum to the all-range distinct total. Copies, repeated events and segments do not add sessions, and inherited pre-creation activity is excluded. All four metrics follow applied filters and the display timezone, including project merges and canonical source selection. The chart fills inactive dates with zero, offers 90-day paging and exact accessible counts, and works in offline HTML reports. See [formulas and coverage details](docs/metrics.md#cache-reasoning-and-daily-sessions).
 
@@ -69,6 +79,8 @@ Project names are hidden by default. Enable **Include project names in copied im
 ## Local storage and live updates
 
 Filter controls respond immediately while the previous metrics remain visible with **Updating metrics… Showing previous results**. **All projects** clears only the project selection; **Reset filters** clears every dashboard filter. If a query fails, the previous results remain available with a persistent error and **Retry**. Saved preferences and HTML exports continue to use the successfully loaded results.
+
+On the first 0.1.5 upgrade of an existing index, SQLite creates `insights.before-copy-review.sqlite3` beside the index before migrating. Existing checkpoints recover previously rejected versions; accessible logs are reparsed once. Missing evidence remains **Awaiting verification** until the source is available or you explicitly select retained history. No source reset is required. See [copy conflict recovery](docs/copy-conflicts.md).
 
 Windows stores the index in `%LOCALAPPDATA%/Codex Session Insights`; macOS uses `~/Library/Application Support/Codex Session Insights`. The local SQLite index includes source paths and parser checkpoints. Accepted snapshots are backed up under `imports/`. Original session files are read-only.
 
@@ -151,3 +163,6 @@ After building the frontend, `scripts/check_desktop.ps1` checks Windows startup,
 Run `node scripts/qa_token_activity_data.mjs` from the app directory for calendar and aggregation checks. `node scripts/qa_token_activity.mjs <demo-url> [report.html] [screenshot-directory]` also checks the three chart modes, filters, tooltips, keyboard and touch interaction, refresh retention, narrow layouts, and an optional offline report. Use an isolated demo server and set `PLAYWRIGHT_CHANNEL=msedge` to use installed Edge.
 
 MIT licensed. Response-counter handling credits [TiboTattle](https://github.com/adamallcock/tibotattle); see [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Local burn freshness, retry behavior, validation results, and the blocked default-index
+recovery are documented in [Local burn coverage](docs/local-burn-coverage.md).

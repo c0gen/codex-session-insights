@@ -3,8 +3,8 @@ from .providers import LABELS
 from .grouped_coverage import coverage_groups
 
 
-def indexed_token_totals(db, table, where, params):
-    groups = coverage_groups(db, table, where, params, 'provider')
+def indexed_token_totals(db, table, where, params, groups=None):
+    groups = coverage_groups(db, table, where, params, 'provider') if groups is None else groups
     result = {}
     for provider in LABELS:
         state = groups.get(provider, {'state': 'unavailable', 'sessions': 0})

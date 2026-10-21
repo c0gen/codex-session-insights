@@ -61,7 +61,6 @@
     "Negative cache differences retain their sign and explicitly say estimated surcharge. Partial estimates say priced subtotal and show exact cached-token coverage. Tooltips expose unrounded USD and percentage values.",
     "Standalone report verification used the existing Python export_html implementation without editing Python. No backend service, live index, original logs or credentials were accessed.",
     "Integration owner must validate backend pricing formulas, deduplication/category semantics, date/tier rates, migrations, applied-filter queries and final combined regressions after backend completes. This owner's API integration checks use synthetic contract fixtures.",
-    "No existing broad QA scripts or app documentation were edited. Significant pre-existing working-tree changes were preserved; no commit, reset, stash, publication or release was performed.",
-    "notify_andy tools were unavailable in this chat's tool inventory, so no optional Telegram completion notification could be sent."
+    "No existing broad QA scripts or app documentation were edited. Significant pre-existing working-tree changes were preserved; no commit, reset, stash, publication or release was performed."
   ]
 }

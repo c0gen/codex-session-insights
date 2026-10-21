@@ -51,3 +51,5 @@ def seed_demo(store):
         project_segments(store, db, segments)
     store.set_setting("demo", True)
     store.set_setting("data_revision", 1)
+    from .projection import PROJECTION_VERSION
+    store.set_setting('projection_version', PROJECTION_VERSION)

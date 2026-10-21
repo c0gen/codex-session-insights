@@ -79,10 +79,10 @@ export class FilterBar {
     if (!root) return;
     const { loading, error } = this.state;
     const feedback = root.querySelector<HTMLElement>("#filter-feedback")!;
-    feedback.hidden = !loading && !error;
+    // Routine refreshes use the header status without adding a row above metrics.
+    feedback.hidden = !error;
     feedback.classList.toggle("error", !!error);
-    feedback.querySelector("span")!.textContent = loading ? "Updating metrics… Showing previous results"
-      : error ? `Couldn’t update metrics. Showing previous results. ${error}` : "";
+    feedback.querySelector("span")!.textContent = error ? `Couldn’t update metrics. Showing previous results. ${error}` : "";
     root.querySelector<HTMLButtonElement>("#filters-retry")!.hidden = !error;
     document.querySelector("#dashboard-results")?.setAttribute("aria-busy", String(loading));
     const label = document.querySelector("#update-label");

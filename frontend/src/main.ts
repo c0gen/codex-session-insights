@@ -1,3 +1,4 @@
+import { showAnalyticsNotices } from "./analytics-notice";
 import { metricCoverage } from "./metric-coverage";
 import "./style.css";
 import "./allowance.css";
@@ -8,7 +9,7 @@ import { version as appVersion } from "../package.json";
 import { call, getDashboard } from "./api";
 import { icon } from "./icons";
 import { activity, modelChart, clearCharts } from "./charts";
-import type { ActionResponse, Dashboard, Job, JobCompletion } from "./types";
+import type { ActionResponse, Dashboard, Job, JobCompletion, UsageLimits, ProviderAllowance, DesktopState } from "./types";
 import { esc, dateLabel, button } from "./ui";
 import { overview } from "./views/overview";
 import { usage } from "./views/usage";
@@ -21,13 +22,16 @@ import { ProjectMerges } from "./project-merges";
 import { DashboardAllowance } from "./allowance";
 import { updateTokenKpi } from "./token-kpi";
 import { updateTextEquivalents } from "./text-equivalents";
+import { LazyWorldsGallery } from "./worlds/lazy-gallery";
 import { AccountsView, accountsPage } from "./views/accounts";
 import { SummaryImageCopy, summaryImageSettings, bindSummaryImageSettings } from "./summary-image";
 import { TokenActivityPanel } from "./token-activity";
 import { DailySessionsPanel } from "./daily-sessions";
+import { CacheRatePanel } from "./cache-rate";
 import { renderProviderAllowances, bindProviderAllowances, bindProviderSetup } from "./provider-ui";
 import { FilterState, restoreFilters } from "./filter-state";
 import { FilterBar } from "./filter-bar";
+import { HistoryReview, coverageNotice } from "./history-review";
 
 const root = document.querySelector<HTMLDivElement>("#app")!;
 let storedFilters: string | null = null;
@@ -47,14 +51,17 @@ const updates = new DeferredReload(() => load(true));
 const filterBar = new FilterBar(filterState, () => { void load(); }, () => updates.finishEditing());
 const feedback = new JobFeedback((message) => toast(message, true));
 const exportFeedback = new ExportFeedback();
+const historyReview = new HistoryReview(dialog, (name, args) => action(name, args), toast);
 const allowance = new DashboardAllowance(() => {
   updates.finishEditing();
   page = "accounts";
   render();
 });
 const summaryCopy = new SummaryImageCopy(toast);
+const worlds = new LazyWorldsGallery(toast);
 const tokenActivity = new TokenActivityPanel();
 const dailySessions = new DailySessionsPanel();
+const cacheRate = new CacheRatePanel();
 const accounts = new AccountsView(toast, dialog, closeDialog);
 const merges = new ProjectMerges(async (name, args, state) => {
   let result: JobCompletion | null = null;
@@ -73,6 +80,7 @@ function sidebar() {
   const items = [
     ["overview", "Overview", "home"],
     ["usage", "Usage & Cost", "chart"],
+    ["visualizations", "Visualizations", "book"],
     ["projects", "Projects", "folder"],
     ["accounts", "Accounts", "user"],
     ["sources", "Sources", "database"],
@@ -111,27 +119,33 @@ function scopeLabel() {
   return parts.length ? parts.join(" · ") : "Usage across all projects and sources";
 }
 
+function analyticsView() { return ["projects", "usage", "sources"].includes(page) ? page : "overview"; }
 function render() {
+  if (!data.readonly && data.loaded_view && data.loaded_view !== analyticsView()) { void load(); return; }
   const view = captureView(root);
+  worlds.detach(page === "visualizations" && !data.exporter);
   clearCharts();
   tokenActivity.unmount();
   dailySessions.unmount();
+  cacheRate.unmount();
   if (data.exporter) page = "sources";
   const title = {
     overview: "Overview",
     usage: "Usage & Cost",
+    visualizations: "Visualizations",
     projects: "Projects",
     accounts: "Accounts",
     sources: data.exporter ? "Mac Exporter" : "Sources",
   }[page];
   const content = {
     overview: () => overview(data, mode, basis, tokenActivity.render(data)),
-    usage: () => usage(data, modelMode, dailySessions.render(data)),
+    usage: () => usage(data, modelMode, dailySessions.render(data), cacheRate.render(data)),
+    visualizations: () => worlds.render(),
     projects: () => projects(data),
     accounts: () => accountsPage(),
     sources: () => exportFeedback.render() + sources(data),
   }[page as "overview"]();
-  root.innerHTML = `${sidebar()}<main class="main"><header class="page-header"><div><div class="title-row"><h1>${title}</h1>${data.demo ? '<span class="demo-pill">Demo data</span>' : data.readonly ? '<span class="demo-pill">Saved report</span>' : ""}</div><p>${page === "sources" ? "Manage where your usage comes from" : page === "accounts" ? "Allowance, token history, and banked resets across your accounts" : esc(scopeLabel())}</p></div><div class="header-actions"><span id="update-label">${data.readonly ? "Saved snapshot" : "Updated just now"}</span>${!data.readonly ? `<button id="refresh" class="button icon-only" aria-label="Refresh insights">${icon("refresh", 21)}</button><button id="copy-summary-image" class="button icon-only" aria-label="Copy summary as an image" title="Copy summary as an image">${icon("copy", 20)}</button>${button("export-html", "Export HTML report", "file")}` : ""}</div></header><div id="summary-image-feedback" class="summary-image-feedback" role="status" hidden></div>${page === "overview" ? '<section id="limits-row" class="limits-row" aria-label="Plan limits and allowance, independent of filters" hidden></section>' : ""}${page !== "sources" && page !== "accounts" ? filterBar.render(data) : ""}<div id="job-banner" class="job-banner" hidden></div><div id="dashboard-results" aria-busy="false">${data.coverage.conflicts || data.coverage.parse_errors ? `<div class="coverage-note">${data.coverage.conflicts} unresolved copy conflicts · ${data.coverage.parse_errors} unparsed records. Accepted history is retained.</div>` : ""}${!data.summary.chats && !data.timeline.length && page === "overview" ? `<div class="empty-state panel"><h2>No usage in this view yet</h2><p>Choose another date range or add a folder in Sources. Your regular Codex folders are included automatically.</p><button data-page="sources" class="button primary">${icon("database")}Open Sources</button></div>` : ""}${page === "accounts" ? `<div id="provider-allowance-cards">${renderProviderAllowances(data.provider_allowances, undefined, data.timezone)}</div>` : ""}${page !== "accounts" && page !== "sources" ? metricCoverage(data) : ""}${content}</div><footer class="app-footer"><span>${icon("shield", 14)}Processed on this computer</span><span>Codex Session Insights · v${appVersion}</span></footer></main>`;
+  root.innerHTML = `${sidebar()}<main class="main"><header class="page-header"><div><div class="title-row"><h1>${title}</h1>${data.demo ? '<span class="demo-pill">Demo data</span>' : data.readonly ? '<span class="demo-pill">Saved report</span>' : ""}</div><p>${page === "visualizations" ? "Text volume brought into perspective" : page === "sources" ? "Manage where your usage comes from" : page === "accounts" ? "Allowance, token history, and banked resets across your accounts" : esc(scopeLabel())}</p></div><div class="header-actions"><span id="update-label">${data.cached_at ? `Cached overview · ${esc(new Date(data.cached_at).toLocaleString())} · Updating…` : data.readonly ? "Saved snapshot" : "Updated just now"}</span>${!data.readonly ? `<button id="refresh" class="button icon-only" aria-label="Refresh insights">${icon("refresh", 21)}</button><button id="copy-summary-image" class="button icon-only" aria-label="Copy summary as an image" title="Copy summary as an image">${icon("copy", 20)}</button>${button("export-html", "Export HTML report", "file")}` : ""}</div></header><div id="summary-image-feedback" class="summary-image-feedback" role="status" hidden></div>${page === "overview" ? '<section id="limits-row" class="limits-row" aria-label="Plan limits and allowance, independent of filters" hidden></section>' : ""}${page !== "sources" && page !== "accounts" && (page !== "visualizations" || basis === "output") ? filterBar.render(data) : ""}<aside class="background-status" aria-label="Background updates"><p id="analytics-refresh-notice" class="fine-print" role="status" hidden></p><p id="cached-overview-notice" class="fine-print" role="status" hidden></p><div id="job-banner" class="job-banner" role="status" aria-live="polite" aria-atomic="true" hidden></div></aside><div id="dashboard-results" aria-busy="false">${coverageNotice(data)}${!data.summary.chats && !data.timeline.length && page === "overview" ? `<div class="empty-state panel"><h2>No usage in this view yet</h2><p>Choose another date range or add a folder in Sources. Your regular Codex folders are included automatically.</p><button data-page="sources" class="button primary">${icon("database")}Open Sources</button></div>` : ""}${page === "accounts" ? `<div id="provider-allowance-cards">${renderProviderAllowances(data.provider_allowances, undefined, data.timezone)}</div>` : ""}${page !== "accounts" && page !== "sources" && page !== "visualizations" ? metricCoverage(data) : ""}${content}</div><footer class="app-footer"><span>${icon("shield", 14)}Processed on this computer</span><span>Codex Session Insights · v${appVersion}</span></footer></main>`;
   bind();
   filterBar.mount(data);
   summaryCopy.mount(data, page);
@@ -143,6 +157,8 @@ function render() {
   if (page === "overview") tokenActivity.mount(render);
   if (page === "usage") modelChart(data, modelMode);
   if (page === "usage") dailySessions.mount();
+  if (page === "usage") cacheRate.mount();
+  if (page === "visualizations") worlds.mount(data, basis, next => { basis = next; render(); });
   if (data.readonly) {
     document
       .querySelectorAll<
@@ -152,7 +168,7 @@ function render() {
       )
       .forEach((s) => (s.disabled = true));
   }
-  if (!data.readonly) showJob(data.job);
+  if (!data.readonly) { showJob(data.job); showAnalyticsNotices(data); }
   restoreView(root, view);
 }
 
@@ -165,6 +181,11 @@ function toast(message: string, error = false, duration = 6500) {
   el.hidden = false;
   toastTimer = setTimeout(() => (el.hidden = true), duration);
 }
+let awaitingProjection = false;
+function projectionLoading(message = "Updating usage index. Verifying the accepted configuration...") {
+  awaitingProjection = true;
+  root.innerHTML = `<main class="main"><header class="page-header"><h1>Codex Session Insights</h1></header><section class="panel loading" role="status"><span class="spinner"></span>${esc(message)}</section></main>`;
+}
 async function load(automatic = false) {
   let pending;
   try { pending = filterState.begin(automatic); }
@@ -172,28 +193,30 @@ async function load(automatic = false) {
   if (!pending) return;
   // Establish the user request before releasing any queued background reload.
   if (!automatic) updates.finishEditing();
-  summaryCopy.setLoading(true);
+  summaryCopy.setLoading(true); worlds.setLoading(true);
   if (data) {
     if (automatic) filterBar.feedback();
     else filterBar.refresh(data);
   }
   try {
-    const next = await getDashboard({ ...pending.filters });
+    const requestedView = analyticsView();
+    const next = await getDashboard({ ...pending.filters, _view: requestedView, _background: true, _retry: !automatic });
     if (!filterState.current(pending)) return;
     // An editor may have opened while the dashboard query was in flight.
     if (automatic && updates.editing()) {
       filterState.finish(pending);
-      summaryCopy.setLoading(false);
+      summaryCopy.setLoading(false); worlds.setLoading(false);
       filterBar.feedback();
       updates.request();
       return;
     }
     const applied = filterState.accept(pending, next.filters ?? pending.filters)!;
-    data = { ...next, filters: applied };
+    awaitingProjection = false;
+    data = { ...next, filters: applied, loaded_view: requestedView };
     if (!data.readonly) {
       try { localStorage.setItem("insights-filters", JSON.stringify(applied)); } catch { /* The view still works without preferences. */ }
     }
-    summaryCopy.setLoading(false);
+    summaryCopy.setLoading(!!data.analytics_refreshing); worlds.setLoading(!!data.analytics_refreshing);
     render();
     const cleared = (["project_id", "source_id", "model"] as const)
       .filter(key => pending.filters[key] && !applied[key]);
@@ -205,9 +228,10 @@ async function load(automatic = false) {
   } catch (e) {
     if (!filterState.current(pending)) return;
     filterState.fail(pending, e instanceof Error ? e.message : String(e));
-    summaryCopy.setLoading(false);
+    summaryCopy.setLoading(false); worlds.setLoading(false);
     filterBar.feedback();
-    if (data) toast(String(e), true);
+    if (String(e).includes("Waiting for the accepted configuration to be verified")) projectionLoading();
+    else if (data) toast(String(e), true);
     else
       root.innerHTML = `<div class="startup-error"><h1>Couldn’t open insights</h1><p>${esc(e)}</p><button onclick="location.reload()">Try again</button></div>`;
   }
@@ -293,6 +317,8 @@ function bind() {
     el.hidden = !el.hidden;
   });
   on("refresh", () => page === "accounts" ? void call("account_refresh", { refresh_local: true }).then(() => accounts.poll()).catch(e => toast(String(e), true)) : action("refresh"));
+  on("review-history", () => { void historyReview.open(data.timezone); });
+  on("review-history-banner", () => { void historyReview.open(data.timezone); });
   on("rebuild-index", () => action("refresh", { rebuild: true }));
   bindProviderSetup(root, async (target, operation) => {
     if (operation === "preview") {
@@ -490,40 +516,87 @@ document.addEventListener("keydown", (e) => {
 });
 document.body.insertAdjacentHTML("beforeend", '<div id="dialog-root"></div><div id="toast" role="status" hidden></div>');
 root.innerHTML =
-  '<div class="loading"><span class="spinner"></span>Opening your insights…</div>';
-load();
+  '<main class="main"><header class="page-header"><h1>Codex Session Insights</h1></header><section class="panel loading"><span class="spinner"></span>Opening saved usage…</section></main>';
+async function startDashboard() {
+  if (!window.__INSIGHTS_REPORT__) {
+    try {
+      const boot = await call<{ ready: boolean; cached_overview?: Dashboard | null; projection?: { pending: boolean; readable: boolean } }>("bootstrap", { ...filters });
+      if (boot.projection && !boot.projection.readable) { projectionLoading(); return; }
+      if (boot.cached_overview) {
+        data = { ...boot.cached_overview, loaded_view: "overview" };
+        render();
+        summaryCopy.setLoading(true);
+      }
+    } catch { /* Older preview servers can still supply the dashboard. */ }
+  }
+  await load();
+}
+void startDashboard();
 window.addEventListener("pywebviewready", () => { if (data) summaryCopy.mount(data, page); });
-if (!window.__INSIGHTS_REPORT__)
-  setInterval(() => { void allowance.poll().catch(() => {}); }, 2000);
-if (!window.__INSIGHTS_REPORT__)
-  setInterval(async () => {
-    await accounts.poll();
-    const snapshot = accounts.snapshot();
-    setDesktopAccounts(snapshot);
-    if (data && snapshot?.token_total) {
-      data.account_token_total = snapshot.token_total;
+interface LiveStatus {
+  ready: boolean;
+  projection?: { pending: boolean; readable: boolean };
+  job: Job;
+  desktop: DesktopState;
+  usage_limits: UsageLimits;
+  provider_allowances: ProviderAllowance[];
+  account_token_total?: Dashboard["account_token_total"];
+  accounts?: import("./account-types").AccountsSnapshot;
+}
+async function pollLive() {
+  if (polling || document.hidden || (!data && !awaitingProjection)) return;
+  polling = true;
+  try {
+    const live = await call<LiveStatus>("live_status", { accounts: page === "accounts" || !!document.querySelector("#desktop-preferences") });
+    if (!live.ready) return;
+    if (awaitingProjection) {
+      if (live.projection && !live.projection.readable) {
+        projectionLoading(live.job.error ? `Index update failed: ${live.job.error}. Recovery will retry automatically.` : undefined);
+        return;
+      }
+      await load();
+      return;
+    }
+    const job = live.job;
+    showJob(job);
+    feedback.observe(job);
+    data.provider_allowances = live.provider_allowances;
+    allowance.accept(live.usage_limits);
+    allowance.setProviders(live.provider_allowances);
+    renderProviderCards();
+    if (live.accounts) {
+      accounts.accept(live.accounts);
+      setDesktopAccounts(live.accounts);
+    }
+    if (live.account_token_total) {
+      data.account_token_total = live.account_token_total;
       updateTokenKpi(data);
       updateTextEquivalents(data, basis);
+      worlds.update(data, basis);
     }
-  }, 2000);
-if (!window.__INSIGHTS_REPORT__)
-  setInterval(async () => {
-    if (polling) return;
-    polling = true;
-    try {
-      const job = await call<Job>("status");
-      showJob(job);
-      feedback.observe(job);
-      const finished = (job.completed || []).filter((item) => item.id > lastCompleted);
-      for (const item of finished) lastCompleted = Math.max(lastCompleted, item.id);
-      if (data && (job.revision !== data.revision || finished.length)) {
-        updates.request();
-      }
-      if (data?.desktop?.available) await pollDesktopSettings(settings, openWidgetAccount);
-    } catch {
-      /* A closing desktop window shuts down the server. */
-    } finally { polling = false; }
-  }, 2000);
+    const finished = (job.completed || []).filter(item => item.id > lastCompleted);
+    for (const item of finished) lastCompleted = Math.max(lastCompleted, item.id);
+    if (job.revision !== data.revision || finished.some(item => item.origin !== "automatic" || page === "sources") || data.cached_at || data.analytics_refreshing) updates.request();
+    if (live.desktop.available) await pollDesktopSettings(settings, openWidgetAccount, live.desktop);
+  } catch { /* Retain previous readings during close or a transient connection failure. */ }
+  finally { polling = false; }
+}
+if (!window.__INSIGHTS_REPORT__) {
+  setInterval(() => { void pollLive(); }, 2000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) void pollLive(); });
+}
+
+function renderProviderCards() {
+  if (!data) return;
+  const cards = root.querySelector<HTMLElement>("#provider-allowance-cards");
+  const markup = renderProviderAllowances(data.provider_allowances, undefined, data.timezone);
+  if (cards && cards.dataset.markup !== markup) {
+    const refocus = cards.contains(document.activeElement) && document.activeElement?.matches("[data-provider-usage-refresh]");
+    cards.innerHTML = markup;
+    cards.dataset.markup = markup;
+    if (refocus) cards.querySelector<HTMLElement>("[data-provider-usage-refresh]")?.focus({ preventScroll: true });
+  }
+}
 
 let providerPolling = false;
 async function pollProviderAllowances() {
@@ -532,14 +605,7 @@ async function pollProviderAllowances() {
   try {
     data.provider_allowances = await call("provider_allowances");
     allowance.setProviders(data.provider_allowances);
-    const cards = root.querySelector<HTMLElement>("#provider-allowance-cards");
-    const markup = renderProviderAllowances(data.provider_allowances, undefined, data.timezone);
-    if (cards && cards.dataset.markup !== markup) {
-      const refocus = cards.contains(document.activeElement) && document.activeElement?.matches("[data-provider-usage-refresh]");
-      cards.innerHTML = markup;
-      cards.dataset.markup = markup;
-      if (refocus) cards.querySelector<HTMLElement>("[data-provider-usage-refresh]")?.focus({ preventScroll: true });
-    }
+    renderProviderCards();
   } catch { /* Closing clients leave the last reading visible with expiry. */ }
   finally { providerPolling = false; }
 }
@@ -548,5 +614,12 @@ if (!window.__INSIGHTS_REPORT__) {
     await call(provider === "antigravity" ? "refresh_antigravity_usage" : "refresh_claude_usage");
     await pollProviderAllowances();
   });
-  setInterval(() => { void pollProviderAllowances(); }, 2000);
+
 }
+
+// Coverage controls survive polling replacements of the burn rows.
+document.addEventListener("click", event => {
+  if ((event.target as Element | null)?.closest("[data-burn-sources]")) {
+    document.querySelector<HTMLButtonElement>('.nav-item[data-page="sources"]')?.click();
+  }
+});

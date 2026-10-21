@@ -70,6 +70,7 @@ export class DashboardAllowance {
   constructor(private openAccounts: () => void = () => {}) {}
 
   snapshot() { return this.limits; }
+  accept(limits: UsageLimits) { this.limits = limits; this.render(); }
 
   mount(limits: UsageLimits | undefined, blocked: boolean, providers?: ProviderAllowance[], timezone = "UTC", selected?: string) {
     this.blocked = blocked;
@@ -92,6 +93,7 @@ export class DashboardAllowance {
     root.hidden = !markup;
     if (root.dataset.markup === markup) return;
     const active = root.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+    const focusedId = active?.id;
     const focusedLimit = active?.dataset.limit;
     const focusedRate = active ? Array.from(root.querySelectorAll(".burn-rate")).indexOf(active) : -1;
     root.innerHTML = markup;
@@ -99,6 +101,7 @@ export class DashboardAllowance {
     root.querySelectorAll<HTMLButtonElement>("[data-limit]").forEach(button => button.addEventListener("click", this.openAccounts));
     if (focusedLimit) root.querySelector<HTMLElement>(`[data-limit="${CSS.escape(focusedLimit)}"]`)?.focus({ preventScroll: true });
     if (focusedRate >= 0) root.querySelectorAll<HTMLElement>(".burn-rate")[focusedRate]?.focus({ preventScroll: true });
+    if (focusedId) root.querySelector<HTMLElement>(`#${CSS.escape(focusedId)}`)?.focus({ preventScroll: true });
   }
 
   async poll() {

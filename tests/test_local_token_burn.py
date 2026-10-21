@@ -14,6 +14,7 @@ def stamp(at):
 def scanned(store, at):
     with store.connect() as db:
         db.execute("UPDATE sources SET updated=?,status='Ready' WHERE kind='folder'", (stamp(at),))
+        db.execute("INSERT OR REPLACE INTO index_health SELECT id,?,?,NULL FROM sources WHERE kind='folder'", (at, at))
 
 
 def record(store, source, identifier, at, total, kind="usage"):
@@ -39,7 +40,9 @@ def test_event_times_define_exact_five_minute_window_and_include_idle_time(local
         record(store, source, identifier, now - age, total)
     record(store, source, "not-usage", now, 99999, "activity")
     scanned(store, now)
-    assert rate.read() == {"value": 3200, "status": "available", "observed_seconds": 300, "updated_at": now}
+    assert rate.read() == {"value": 3200, "status": "available", "observed_seconds": 300, "updated_at": now,
+        "coverage": {"state": "complete", "checked_at": now, "reasons": [], "historical_pending_files": 0, "live_pending_files": 0},
+        "indexing": {"live_checked_at": now, "historical_pending_files": 0, "live_pending_files": 0}}
 
 
 def test_first_scan_is_immediately_available_and_unchanged_reads_do_not_sample(local):
@@ -107,6 +110,11 @@ def test_index_failures_preserve_last_estimate_as_stale_and_recovery_uses_curren
             db.execute("UPDATE sources SET status='Offline'")
     result = rate.read()
     assert result.pop("detail")
+    assert result.pop('partial')
+    coverage = result.pop('coverage')
+    assert coverage['state'] == 'partial'
+    assert coverage['reasons'][0]['code'] == ('source_offline' if failure == 'offline' else 'indexing_delayed')
+    expected.pop('coverage')
     assert result == {**expected, "status": "stale"}
     clock[0] = expected["updated_at"] + 700
     with store.connect() as db:
