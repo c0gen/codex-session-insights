@@ -40,7 +40,11 @@ def test_event_times_define_exact_five_minute_window_and_include_idle_time(local
         record(store, source, identifier, now - age, total)
     record(store, source, "not-usage", now, 99999, "activity")
     scanned(store, now)
-    assert rate.read() == {"value": 3200, "status": "available", "observed_seconds": 300, "updated_at": now,
+    result = rate.read()
+    assert result['coverage']['freshness']['state'] == 'current'
+    result['coverage'] = {k: result['coverage'][k] for k in ('state', 'checked_at', 'reasons', 'historical_pending_files', 'live_pending_files')}
+    result['indexing'] = {k: result['indexing'][k] for k in ('live_checked_at', 'historical_pending_files', 'live_pending_files')}
+    assert result == {"value": 3200, "status": "available", "observed_seconds": 300, "updated_at": now,
         "coverage": {"state": "complete", "checked_at": now, "reasons": [], "historical_pending_files": 0, "live_pending_files": 0},
         "indexing": {"live_checked_at": now, "historical_pending_files": 0, "live_pending_files": 0}}
 
@@ -115,6 +119,10 @@ def test_index_failures_preserve_last_estimate_as_stale_and_recovery_uses_curren
     assert coverage['state'] == 'partial'
     assert coverage['reasons'][0]['code'] == ('source_offline' if failure == 'offline' else 'indexing_delayed')
     expected.pop('coverage')
+    indexing = result.pop('indexing')
+    assert indexing['freshness'] == 'delayed'
+    assert indexing['live_checked_at'] == expected['indexing']['live_checked_at']
+    expected.pop('indexing')
     assert result == {**expected, "status": "stale"}
     clock[0] = expected["updated_at"] + 700
     with store.connect() as db:

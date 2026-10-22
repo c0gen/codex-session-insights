@@ -6,10 +6,14 @@ from pathlib import Path
 
 
 class LivePaths:
-    def __init__(self, clock=time.monotonic, cooldown=5):
+    def __init__(self, clock=time.monotonic, cooldown=5, discovery_interval=30):
         self.clock, self.cooldown = clock, cooldown
+        # Burn-rate freshness requires discovery within twice this interval.
+        self.discovery_interval = discovery_interval
         self.lock = threading.Lock()
         self.paths = {}
+        self.origins, self.consumed = {}, {}
+        self.watcher_available = False
         self.discovery = set()
         self.last_discovery = None
 
@@ -25,10 +29,14 @@ class LivePaths:
                 if not path.is_relative_to(root):
                     continue
                 if event.is_directory:
-                    self.discovery.add(source_id)
+                    # Listing a folder updates its access time on NTFS; only a
+                    # changed directory structure can hide files from watchers.
+                    if event.event_type != 'modified':
+                        self.discovery.add(source_id)
                 elif path.suffix.lower() == '.jsonl' and not path.name.startswith('._'):
                     # First event wins: a continuous writer cannot postpone its scan.
                     self.paths.setdefault((source_id, str(path)), self.clock())
+                    self.origins.setdefault((source_id, str(path)), 'watcher')
 
     def take(self, *, force=False, exclude=()):
         excluded = set(exclude)
@@ -37,8 +45,13 @@ class LivePaths:
             keys = [key for key, at in self.paths.items()
                     if key not in excluded and (force or now - at >= self.cooldown)]
             for key in keys:
+                self.consumed[key] = (time.time() - max(0, now - self.paths[key]), self.origins.pop(key, 'fallback'))
                 del self.paths[key]
             return keys
+
+    def evidence(self, key):
+        with self.lock:
+            return self.consumed.pop(key, (time.time(), 'fallback'))
 
     def pending(self):
         with self.lock:
@@ -47,11 +60,15 @@ class LivePaths:
     def requeue(self, keys):
         with self.lock:
             for key in keys:
-                self.paths.setdefault(key, self.clock() - self.cooldown)
+                evidence = self.consumed.pop(key, None)
+                self.paths.setdefault(key, self.clock() - max(self.cooldown, time.time() - evidence[0] if evidence else self.cooldown))
+                if evidence:
+                    self.origins.setdefault(key, evidence[1])
 
     def discovery_due(self):
         with self.lock:
-            return bool(self.discovery or self.last_discovery is None or self.clock() - self.last_discovery >= 30)
+            return bool(self.discovery or self.last_discovery is None
+                        or self.clock() - self.last_discovery >= self.discovery_interval)
 
     def begin_discovery(self):
         with self.lock:
@@ -61,6 +78,8 @@ class LivePaths:
     def prune(self, source_ids):
         with self.lock:
             self.paths = {key: at for key, at in self.paths.items() if key[0] in source_ids}
+            self.origins = {key: origin for key, origin in self.origins.items() if key[0] in source_ids}
+            self.consumed = {key: value for key, value in self.consumed.items() if key[0] in source_ids}
             self.discovery.intersection_update(source_ids)
 
     def poll_retries(self, store):

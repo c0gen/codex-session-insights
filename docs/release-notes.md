@@ -1,5 +1,16 @@
 # Unreleased — concurrent accounts, faster grouping and live allowance
 
+- Keep unfinished custom dates while moving between pages. Navigation uses the accepted filters, or the submitted snapshot when Apply is still pending; newer edits stay in the controls.
+- Keep metric failures and Retry visible on every page, including Sources. Retry repeats the failed selection; Refresh reloads metrics after indexing even when no files changed, without replacing newer requests.
+- Show query progress and dated cached/results status consistently across live polls. HTML export waits for the first successful dashboard query, then captures the last accepted filters even during later updates or failures.
+- Make Overview’s Explore in 3D action readable before the gallery loads. Keep gallery assets lazy.
+- Contain keyboard and programmatic focus in dialogs, hide background controls from assistive technology, retain accessible error announcements, and restore the opener after closing or background redraws.
+- Fix indexing that could stall on large histories, for example during the one-time reparse after a parser upgrade. Background maintenance no longer starts a second full folder scan inside a running scan, and repeated folder scans can no longer crowd out parsing. Notifications that only report a file or folder being read (Windows last-access times) no longer requeue unchanged files or force rescans. Continuously written sources still complete. Each indexed line is decoded once.
+- Reduce background CPU while indexing. Background dashboard metrics use a two-second adaptive minimum interval (longer for slow queries), with navigation and import completion requesting an immediate refresh. Previous results remain visible meanwhile. A background update that returns the same results no longer rebuilds the page and charts.
+- Quitting finishes within about 10 seconds and interrupts long report queries; unfinished indexing resumes on the next launch. Launching again while the app is still closing now starts it once the previous process exits, instead of doing nothing. Reloading after a startup error no longer adds a second tray icon, widget or activation listener.
+- Failing automatic scans, such as on a full disk, retry with backoff up to five minutes. Claude plan-limit checks never retry more often than their five-minute interval.
+- Delete one-time upgrade backups (`insights.before-copy-review.sqlite3`, `insights.before-claude-identity-v1.sqlite3`) 14 days after their upgrade has finished. Unfinished upgrades keep their backups. Interrupted backup copies are removed after a day.
+
 ## Token Worlds
 
 - Show literal novel collections with 150 books/bookcase, expanding aisles, floor-plan navigation and fractional final books. Give Floppy Vault fixed 100-disk cases and 20-case racks with inspectable contents.

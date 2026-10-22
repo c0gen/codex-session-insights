@@ -1,4 +1,5 @@
 """Additive cache estimates and distinct daily presence from indexed facts."""
+from .metric_queries import source as metric_source
 
 
 def subset_percent(numerator, denominator):
@@ -8,7 +9,7 @@ def subset_percent(numerator, denominator):
 def query_usage_metrics(db, table, where, params, summary, discount=None):
     row = discount if discount is not None else db.execute(
         "SELECT sum(r.cache_discount) discount,sum(r.cache_priced) priced FROM "
-        + table + " r WHERE r.kind='usage' AND " + where, params).fetchone()
+        + metric_source(table, where) + " WHERE r.kind='usage' AND " + where, params).fetchone()
     cached = summary["cached_tokens"]
     priced = int(row["priced"] or 0)
     return {
@@ -27,5 +28,5 @@ def query_daily_sessions(db, table, where, params):
         "count(DISTINCT CASE WHEN c.category='top_level' AND r.kind='presence' THEN r.session_id END) chats,"
         "count(DISTINCT CASE WHEN c.category='spawned_subagent' OR r.kind='subagent_presence' THEN r.session_id END) subagents,"
         "count(DISTINCT CASE WHEN c.category='system_subagent' THEN r.session_id END) system_agents "
-        "FROM " + table + " r JOIN session_metadata c ON c.segment_id=r.segment_id "
+        "FROM " + metric_source(table, where) + " JOIN session_metadata c ON c.segment_id=r.segment_id "
         "WHERE r.kind IN ('presence','subagent_presence') AND " + where + " GROUP BY r.day ORDER BY r.day", params)]

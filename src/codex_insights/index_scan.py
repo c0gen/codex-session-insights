@@ -1,12 +1,27 @@
 """Cooperative scans: watcher work can interrupt historical file parsing."""
+import os
+import stat as stat_module
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from pathlib import Path
 
 from .index_file import FileIndexer
 from .index_failures import FileFailures
 from .index_health import source_checked
 from .providers import adapter
+
+DISCOVERY_INTERVAL = 30
+
+
+@contextmanager
+def owning_live_work(store):
+    """While a scan drains watcher hints itself, nested cooperative work must not."""
+    store.active_scans = getattr(store, 'active_scans', 0) + 1
+    try:
+        yield
+    finally:
+        store.active_scans -= 1
 
 
 class Scan:
@@ -21,7 +36,12 @@ class Scan:
         self.tasks = OrderedDict()
         self.urgent = set()
         self.live = getattr(store, 'live_paths', None)
+        # Measured from the END of the last inventory: a walk slower than the
+        # interval must never leave room for nothing but further walks.
         self.last_inventory = time.monotonic()
+        self.inventory_seconds = 0.0
+        self.walk = None
+        self.queued = {}
         self.complete = set()
         self.finalized, self.finalizers, self.discovery_stamps = set(), {}, {}
         self.counts = {}
@@ -39,38 +59,91 @@ class Scan:
         key = (sid, str(path))
         if sid not in self.sources:
             return
+        try:
+            stamp = Path(path).stat()
+            signature = (stamp.st_size, stamp.st_mtime_ns)
+        except OSError:
+            stamp = signature = None
+        # Re-walks find the same queued backlog. Identical bytes queued the same
+        # way already carry exactly these pending rows and evidence.
+        if not urgent and key in self.tasks and signature is not None and self.queued.get(key) == (signature, False):
+            return
         if key not in self.tasks:
             self.tasks[key] = None
         if urgent:
             self.urgent.add(key)
             self.tasks.move_to_end(key, last=False)
+        self.queued[key] = (signature, urgent)
         db.execute('INSERT OR IGNORE INTO index_pending VALUES(?,?)', key)
+        observed, origin = self.live.evidence(key) if urgent and self.live else (time.time(), 'fallback')
+        db.execute('UPDATE pending_progress SET oldest_pending_at=min(oldest_pending_at,?) WHERE source_id=? AND path=?', (observed, *key))
+        db.execute('INSERT OR IGNORE INTO pending_origins VALUES(?,?,?)', (*key, origin))
         # A bound applies only to the exact bytes already verified. A file
         # changed by a watcher can never inherit an old historical bound.
         db.execute('DELETE FROM pending_time_evidence WHERE source_id=? AND path=?', key)
-        try:
-            stamp = Path(path).stat()
-            if not urgent:
-                db.execute('INSERT INTO pending_time_evidence SELECT source_id,path,affected_until FROM file_time_evidence '
-                           'WHERE source_id=? AND path=? AND size=? AND mtime=?', (*key, stamp.st_size, stamp.st_mtime_ns))
-        except OSError:
-            pass
+        if stamp is not None and not urgent:
+            db.execute('INSERT INTO pending_time_evidence SELECT source_id,path,affected_until FROM file_time_evidence '
+                       'WHERE source_id=? AND path=? AND size=? AND mtime=?', (*key, stamp.st_size, stamp.st_mtime_ns))
+
+    def current(self, sid, key, cached, stat):
+        """Whether these exact bytes are already indexed and verified by the current parser."""
+        failures = self.failures[sid]
+        return (not (self.reader.rebuild and sid in self.primary) and cached is not None
+                and cached['parser_version'] == failures.parser_version
+                and cached['size'] == stat.st_size and cached['mtime'] == stat.st_mtime_ns
+                and cached['pending'] is None
+                and key not in failures.failed and cached['verified'] is not None)
 
     def hints(self):
         if not self.live:
             return
+        taken = self.live.take()
+        if not taken:
+            return
         others = []
-        for sid, path in self.live.take():
-            if sid not in self.sources:
-                others.append((sid, path))
-                continue
-            # Deletions require inventory verification, not a fabricated read error.
-            if Path(path).is_file():
-                self.enqueue(sid, path, urgent=True)
+        with self.store.connect() as db:
+            for sid, path in taken:
+                if sid not in self.sources:
+                    others.append((sid, path))
+                    continue
+                try:
+                    stat = os.stat(path)
+                except OSError:
+                    self.live.evidence((sid, path))
+                    continue  # Deletions require inventory verification, not a fabricated read error.
+                if not stat_module.S_ISREG(stat.st_mode):
+                    self.live.evidence((sid, path))
+                    continue
+                # Access-time, attribute and security events report no new bytes.
+                from .index_health import checkpoints
+                cached = checkpoints(db, sid, path).fetchone()
+                if self.current(sid, path, cached, stat):
+                    self.live.evidence((sid, path))
+                    continue
+                self._enqueue(db, sid, path, urgent=True)
         self.live.requeue(others)
 
+    def inventory_due(self, interval=DISCOVERY_INTERVAL):
+        return time.monotonic() >= self.last_inventory + max(interval, 2 * self.inventory_seconds)
+
     def inventory(self, primary_only=False):
-        self.last_inventory = time.monotonic()
+        for _ in self.inventory_steps(primary_only):
+            pass
+
+    def advance_inventory(self, deadline, primary_only=False):
+        """Resume one bounded slice of discovery; return whether a walk remains."""
+        if self.walk is None:
+            self.walk = self.inventory_steps(primary_only)
+        while time.monotonic() < deadline and not self.cancelled():
+            try:
+                next(self.walk)
+            except StopIteration:
+                self.walk = None
+                return False
+        return True
+
+    def inventory_steps(self, primary_only=False):
+        begun = time.monotonic()
         for sid, source in self.sources.items():
             if primary_only and sid not in self.primary:
                 continue
@@ -92,9 +165,8 @@ class Scan:
                         source_checked(db, sid, error='source_offline')
                     continue
                 with self.store.connect() as db:
-                    checkpoints = {r['path']: dict(r) for r in db.execute(
-                        'SELECT f.path,f.size,f.mtime,f.parser_version,c.checked_at AS verified FROM files f '
-                        'LEFT JOIN file_coverage c ON c.source_id=f.source_id AND c.path=f.path WHERE f.source_id=?', (sid,))}
+                    from .index_health import checkpoints as verified_checkpoints
+                    checkpoints = {r['path']: dict(r) for r in verified_checkpoints(db, sid)}
                 changed, seen = [], set()
                 for path in adapter(source['provider']).discover(root, source['kind']):
                     if self.cancelled():
@@ -107,14 +179,13 @@ class Scan:
                         self.hints()
                         if self.urgent:
                             self.step(urgent_only=True)
+                        yield
                     cached = checkpoints.get(key)
                     try:
                         stat = path.stat()
                         if self.reader.rebuild and self.completed_stamps.get((sid, key)) == (stat.st_size, stat.st_mtime_ns):
                             continue
-                        if (not (self.reader.rebuild and sid in self.primary) and cached and cached['parser_version'] == failures.parser_version
-                                and cached['size'] == stat.st_size and cached['mtime'] == stat.st_mtime_ns
-                                and key not in failures.failed and cached['verified'] is not None):
+                        if self.current(sid, key, cached, stat):
                             continue
                         changed.append((stat.st_mtime_ns, path))
                     except OSError:
@@ -132,6 +203,7 @@ class Scan:
                     self.hints()
                     if self.urgent:
                         self.step(urgent_only=True)
+                    yield
                 with self.store.connect() as db:
                     for row in db.execute('SELECT path FROM file_coverage WHERE source_id=?', (sid,)).fetchall():
                         if row[0] not in seen:
@@ -140,6 +212,8 @@ class Scan:
                     for row in db.execute('SELECT path FROM index_pending WHERE source_id=?', (sid,)).fetchall():
                         if row[0] not in seen:
                             db.execute('DELETE FROM index_pending WHERE source_id=? AND path=?', (sid, row[0]))
+                            db.execute('DELETE FROM pending_progress WHERE source_id=? AND path=?', (sid, row[0]))
+                            db.execute('DELETE FROM pending_origins WHERE source_id=? AND path=?', (sid, row[0]))
                     source_checked(db, sid, started, discovered=True)
                 self.discovery_stamps[sid] = started
                 self.complete.add(sid)
@@ -147,6 +221,8 @@ class Scan:
                 self.report['errors'] += 1
                 with self.store.connect() as db:
                     source_checked(db, sid, error='discovery_error')
+        self.last_inventory = time.monotonic()
+        self.inventory_seconds = self.last_inventory - begun
 
     def step(self, urgent_only=False):
         if not self.tasks or self.cancelled():
@@ -178,6 +254,7 @@ class Scan:
                     self.completed_stamps[key] = tuple(saved)
             del self.tasks[key]
             self.urgent.discard(key)
+            self.queued.pop(key, None)
         if self.progress:
             self.progress({**self.report, 'files': self.processed, 'source': self.sources[sid]['label']})
 
@@ -186,6 +263,9 @@ class Scan:
         return advance(self, deadline)
 
     def close(self):
+        if self.walk is not None:
+            self.walk.close()
+            self.walk = None
         for task in self.finalizers.values():
             task.close()
         if self.live:
@@ -196,33 +276,36 @@ class Scan:
 
     def run_pending(self):
         try:
-            self.reader.flush()
-            self.hints()
-            while self.tasks and not self.cancelled():
+            with owning_live_work(self.store):
+                self.reader.flush()
                 self.hints()
-                self.step()
-                self.finalize()
-            self.reader.flush()
+                while self.tasks and not self.cancelled():
+                    self.hints()
+                    self.step()
+                    self.finalize()
+                self.reader.flush()
         finally:
             self.close()
 
     def run(self):
         try:
-            self.reader.flush()
-            self.hints()
-            self.inventory(primary_only=True)
-            while self.tasks and not self.cancelled():
+            with owning_live_work(self.store):
+                self.reader.flush()
                 self.hints()
-                if self.live and time.monotonic() - self.last_inventory >= 30:
-                    self.inventory()
-                self.step()
-                self.finalize()
-            self.reader.flush()
-            if self.cancelled():
-                return
-            while self.finalize():
-                self.hints()
+                self.inventory(primary_only=True)
+                interval = getattr(self.live, 'discovery_interval', DISCOVERY_INTERVAL)
                 while self.tasks and not self.cancelled():
+                    self.hints()
+                    if self.live and self.inventory_due(interval):
+                        self.inventory()
                     self.step()
+                    self.finalize()
+                self.reader.flush()
+                if self.cancelled():
+                    return
+                while self.finalize():
+                    self.hints()
+                    while self.tasks and not self.cancelled():
+                        self.step()
         finally:
             self.close()

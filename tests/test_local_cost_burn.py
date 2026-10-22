@@ -58,6 +58,10 @@ def test_cost_window_uses_same_scope_boundaries_and_idle_minutes_as_tokens(local
     scanned(store, clock[0])
     result = reader.read_rates()
     assert result["token_burn_rate"]["value"] == 400
+    assert result['cost_burn_rate']['coverage']['freshness']['state'] == 'current'
+    for field, keys in [('coverage', ('state', 'checked_at', 'reasons', 'historical_pending_files', 'live_pending_files')),
+                        ('indexing', ('live_checked_at', 'historical_pending_files', 'live_pending_files'))]:
+        result['cost_burn_rate'][field] = {k: result['cost_burn_rate'][field][k] for k in keys}
     assert result["cost_burn_rate"] == dict(value=.3, status="available", observed_seconds=300,
                                            updated_at=clock[0], total_tokens=2000, priced_tokens=2000,
                                            coverage=dict(state="complete", checked_at=clock[0], reasons=[], historical_pending_files=0, live_pending_files=0),

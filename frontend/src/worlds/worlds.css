@@ -486,18 +486,7 @@
   outline: 2px solid #9d793f;
   outline-offset: 3px;
 }
-.equivalents-explore {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  border: 0;
-  background: none;
-  color: #5c704f;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-left: 14px;
-}
+
 @media (max-width: 1150px) {
   .world-intro {
     align-items: flex-start;

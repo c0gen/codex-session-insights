@@ -143,6 +143,8 @@ def finish_verification(db, source_id, segments=None):
 
 
 def forget(db, source_id):
+    db.execute('DELETE FROM transfer_fingerprints WHERE source_id=?', (source_id,))
+    db.execute('DELETE FROM transfer_fingerprint_sources WHERE source_id=?', (source_id,))
     for table in ('claude_recovery_sources', 'claude_recovery_stage', 'claude_recovery_baseline',
                   'claude_recovery_variants', 'claude_recovery_observations', 'claude_recovery_moves', 'claude_recovery_choices', 'claude_identity_issues'):
         db.execute('DELETE FROM ' + table + ' WHERE source_id=?', (source_id,))

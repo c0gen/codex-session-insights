@@ -201,7 +201,7 @@ def rebuild_projection(store, progress=None):
             project_segments(store, db, segments, progress)
         else:
             project_segments(store, db, segments)
-        db.execute("INSERT OR REPLACE INTO settings VALUES('bucket_version','1')")
+        db.execute("INSERT OR REPLACE INTO settings VALUES('bucket_version','2')")
         revision = store.setting("data_revision", 0) + 1
         db.execute("INSERT OR REPLACE INTO settings VALUES('data_revision',?)", (json.dumps(revision),))
         db.execute("DELETE FROM projection_queue")

@@ -8,6 +8,9 @@ from .projection import project_segments
 from .index_health import file_checked, event_time_bound
 from .codec import timestamp
 
+# Parsers without a per-line decode result fall back to decoding the evidence.
+_UNPARSED = object()
+
 
 def anchor(path, offset):
     with path.open("rb") as stream:
@@ -71,16 +74,22 @@ class FileIndexer:
             if (current and not rebuild and str(path) not in failures.failed
                     and cached["size"] == stat.st_size and cached["mtime"] == stat.st_mtime_ns):
                 with store.connect() as db:
-                    verified = db.execute('SELECT 1 FROM file_coverage WHERE source_id=? AND path=?',
-                                          (source['id'], str(path))).fetchone()
+                    verified = db.execute('SELECT c.* FROM file_coverage c JOIN file_time_evidence e '
+                        'ON e.source_id=c.source_id AND e.path=c.path WHERE c.source_id=? AND c.path=? AND e.size=? AND e.mtime=?',
+                        (source['id'], str(path), stat.st_size, stat.st_mtime_ns)).fetchone()
                     if not verified:
                         saved = unpack(cached['state'])
                         gaps = saved.get('parse_errors', 0)
                         reason = 'parse_gap' if gaps or (not saved.get('fact') and stat.st_size) else 'incomplete_tail' if cached['offset'] < stat.st_size else None
                         file_checked(db, source['id'], path, issues=max(gaps, int(bool(reason))), reason=reason,
                                      bound=event_time_bound(path, stat.st_size) if reason else None)
+                        evidence = saved.get('event_time_evidence', {})
+                        db.execute('INSERT OR REPLACE INTO file_time_evidence VALUES(?,?,?,?,?)',
+                            (source['id'], str(path), stat.st_size, stat.st_mtime_ns,
+                             evidence.get('latest') if evidence.get('valid') and cached['offset'] == stat.st_size else None))
                     else:
-                        db.execute("DELETE FROM index_pending WHERE source_id=? AND path=?", (source["id"], str(path)))
+                        file_checked(db, source['id'], path, issues=verified['issue_count'],
+                                     bound=verified['affected_until'], reason=verified['reason'])
                 return
             state = None
             if current and not rebuild:
@@ -102,15 +111,17 @@ class FileIndexer:
                         break
                     parser.consume(line, stream.tell())
                     if evidence['valid']:
-                        try:
-                            item = json.loads(line)
-                            at = timestamp(item.get('timestamp')) if isinstance(item, dict) else None
-                            if at is None:
-                                evidence['valid'] = False
-                            else:
-                                evidence['latest'] = max(evidence['latest'] or at.timestamp(), at.timestamp())
-                        except (ValueError, TypeError, UnicodeError):
+                        at = getattr(parser, 'line_time', _UNPARSED)
+                        if at is _UNPARSED:
+                            try:
+                                item = json.loads(line)
+                                at = timestamp(item.get('timestamp')) if isinstance(item, dict) else None
+                            except (ValueError, TypeError, UnicodeError):
+                                at = None
+                        if at is None:
                             evidence['valid'] = False
+                        else:
+                            evidence['latest'] = max(evidence['latest'] or at.timestamp(), at.timestamp())
                     if parser.state.get("ordinal", 0) % 256 == 0:
                         yield
             if provider_adapter.provider == 'antigravity' and (path.stat().st_size != stat.st_size or path.stat().st_mtime_ns != stat.st_mtime_ns):
@@ -139,7 +150,7 @@ class FileIndexer:
                 tail = offset < stat.st_size
                 reason = 'parse_gap' if gaps or (not fact and stat.st_size) else 'incomplete_tail' if tail else None
                 file_checked(db, source['id'], path, issues=max(gaps, int(bool(reason))), reason=reason,
-                             bound=event_time_bound(path, stat.st_size) if reason else None)
+                             bound=event_time_bound(path, stat.st_size) if reason else None, progress=offset > start_offset)
                 db.execute('INSERT OR REPLACE INTO file_time_evidence VALUES(?,?,?,?,?)',
                            (source['id'], str(path), stat.st_size, stat.st_mtime_ns,
                             evidence['latest'] if evidence['valid'] and not tail else None))

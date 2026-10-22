@@ -173,6 +173,11 @@ def export_snapshot(store, destination, label="This computer", progress=None, ca
 
 
 def import_snapshot(store, path, progress=None, cancel=None):
+    from .incremental_transfers import import_snapshot as incremental
+    return incremental(store, path, progress, cancel)
+
+
+def _legacy_import_snapshot(store, path, progress=None, cancel=None):
     if getattr(store, 'cooperate', None) and not getattr(store, 'isolated', False):
         from .isolated_jobs import run
         # The normal importer validates the archive and manifest in the private
@@ -196,7 +201,7 @@ def import_snapshot(store, path, progress=None, cancel=None):
             finally:
                 temporary.unlink(missing_ok=True)
         result = run(store, 'import:' + exporter,
-                     lambda private, report: import_snapshot(private, path, report, cancel), progress, preserve_archive,
+                     lambda private, report: _legacy_import_snapshot(private, path, report, cancel), progress, preserve_archive,
                      job_key=str(manifest.get('revision')) + ':' + str(manifest.get('facts_sha256')))
         return result
     ensure_projection(store)
@@ -276,6 +281,8 @@ def import_snapshot(store, path, progress=None, cancel=None):
                 db.execute('DELETE FROM ' + table + ' WHERE source_id=?', (source_id,))
             db.execute('DELETE FROM history_choices WHERE scope=?', (source_id,))
             db.execute("DELETE FROM candidates WHERE source_id=?", (source_id,))
+            db.execute('DELETE FROM transfer_fingerprints WHERE source_id=?', (source_id,))
+            db.execute('DELETE FROM transfer_fingerprint_sources WHERE source_id=?', (source_id,))
             db.execute("INSERT INTO sources(id,label,kind,revision,status,updated) VALUES(?,?,'import',?,'Imported',?) ON CONFLICT(id) DO UPDATE SET label=excluded.label,revision=excluded.revision,status=excluded.status,updated=excluded.updated", (
                 source_id, str(manifest.get("label") or "Imported computer")[:200], revision, manifest.get("created_at")))
             count = 0
@@ -318,6 +325,9 @@ def import_snapshot(store, path, progress=None, cancel=None):
             db.execute("UPDATE sources SET provider=? WHERE id=?", (next(iter(providers)) if len(providers) == 1 else "mixed" if providers else "codex", source_id))
             if 'claude_code' in providers:
                 db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', ('claude_import_format:' + source_id, json.dumps(manifest['format_version'])))
+            else:
+                from .claude_recovery_store import retire_verification
+                retire_verification(db, source_id, revision)
             if recover_input:
                 from .claude_recovery_publish import publish
                 incoming_source = dict(db.execute('SELECT * FROM sources WHERE id=?', (source_id,)).fetchone())

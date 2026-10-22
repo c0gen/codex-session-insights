@@ -192,7 +192,7 @@ def publish(db, version):
     db.execute('DELETE FROM projection_dependencies')
     row = db.execute("SELECT value FROM settings WHERE key='data_revision'").fetchone()
     db.executemany('INSERT OR REPLACE INTO settings VALUES(?,?)',
-        [('data_revision', json.dumps((json.loads(row[0]) if row else 0) + 1)), ('projection_version', json.dumps(version)), ('bucket_version', '1')])
+        [('data_revision', json.dumps((json.loads(row[0]) if row else 0) + 1)), ('projection_version', json.dumps(version)), ('bucket_version', '2')])
     from .projection_state import publish as accept_configuration
     accept_configuration(db)
     reset(db)

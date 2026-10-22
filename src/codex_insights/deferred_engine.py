@@ -95,9 +95,16 @@ class DeferredEngine:
             raise ValueError(self.error)
         return self._engine.call(action, args)
 
-    def close(self):
+    def begin_close(self):
+        """Quit begins winding the real engine down while the window closes."""
         self.stop.set()
         self.cancel.set()
+        begin_close = getattr(self._engine, 'begin_close', None)
+        if begin_close:
+            begin_close()
+
+    def close(self):
+        self.begin_close()
         if self._engine:
             self._engine.close()
         if self._thread and self._thread is not threading.current_thread():

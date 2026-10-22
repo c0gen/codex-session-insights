@@ -30,7 +30,7 @@ state.draft.start = '2026-09-01';
 const first = state.begin();
 state.draft.range = '7';
 const second = state.begin();
-assert.equal(state.begin(true), null); // Background queries cannot supersede user requests.
+assert.equal(state.begin("background"), null); // Background queries cannot supersede user requests.
 const exportDuringLoad = state.exportSnapshot();
 assert.equal(exportDuringLoad.range, 'all');
 state.accept(second);
@@ -41,7 +41,7 @@ assert(Object.isFrozen(exportDuringLoad));
 state.draft.range = '30'; request = state.begin(); state.finish(request);
 assert.equal(state.exportSnapshot().range, '7'); // Failed requests do not change the applied state.
 Object.assign(state.draft, { range: 'custom', start: '2026-08-01', end: '2026-08-02' });
-request = state.begin(true);
+request = state.begin("background");
 assert.equal(request.filters.range, '7');
 state.draft.start = '2026-08-03';
 state.accept(request);
@@ -66,11 +66,35 @@ state.fail(resetRequest, 'Query failed');
 assert.equal(state.loading, false);
 assert.equal(state.error, 'Query failed');
 assert.equal(state.exportSnapshot().project_id, 'merged');
-assert.equal(state.begin(true), null); // Keep failed selections visible until retry.
+assert.equal(state.begin("background"), null); // Keep failed selections visible until retry.
 request = state.begin();
-assert.equal(state.error, null);
+assert.equal(state.error, 'Query failed');
 assert.equal(state.loading, true);
 state.accept(request);
 assert.equal(state.loading, false);
 assert.equal(state.exportSnapshot().project_id, '');
 console.log('Filter state regressions passed: restore validation, drafts, failures, exports, races, background refresh, merged IDs.');
+
+// Navigation must never validate or submit unfinished dates.
+const navigation = new FilterState({...defaults, range: '7'});
+assert.equal(navigation.hasApplied, false);
+request = navigation.begin('initial'); navigation.accept(request);
+assert.equal(navigation.hasApplied, true);
+Object.assign(navigation.draft, {range:'custom',start:'2026-10-10',end:''});
+request = navigation.begin('navigation');
+assert.equal(request.filters.range, '7'); navigation.accept(request);
+assert.equal(navigation.draft.end, '');
+Object.assign(navigation.draft, {start:'2026-09-01',end:'2026-09-02'});
+const submitted = navigation.begin('apply');
+navigation.draft.end = '2026-09-03';
+request = navigation.begin('navigation');
+assert.equal(request.filters.end, '2026-09-02');
+assert.equal(navigation.accept(submitted), null);
+navigation.fail(request, 'Failed submitted view');
+navigation.draft.start = '';
+request = navigation.begin('retry');
+assert.equal(request.filters.start, '2026-09-01');
+assert.equal(request.filters.end, '2026-09-02');
+navigation.accept(request);
+assert.equal(navigation.draft.start, '');
+assert.equal(navigation.exportSnapshot().end, '2026-09-02');

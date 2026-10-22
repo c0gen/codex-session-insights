@@ -98,6 +98,8 @@ class SessionParser:
         self.seen = set(self.state["messages_seen"])
 
     def consume(self, raw, end_offset):
+        # The indexer's event-time evidence reuses this decode; None means unbounded.
+        self.line_time = None
         self.state["offset"] = end_offset
         self.state["ordinal"] += 1
         self.state["hash"] = hashlib.sha256(self.state["hash"].encode() + raw).hexdigest()
@@ -114,7 +116,7 @@ class SessionParser:
             return
         observe_record(self.state, event)
         pl = event.get("payload")
-        t = timestamp(event.get("timestamp"))
+        t = self.line_time = timestamp(event.get("timestamp"))
         if not isinstance(pl, dict):
             return
         top, kind = event.get("type"), pl.get("type")

@@ -1337,3 +1337,7 @@ input[type="checkbox"] {
 .provider-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 600px) { .provider-setup article { grid-template-columns: 1fr auto; } .provider-setup-actions { grid-column: 1 / -1; } }
 .provider-setup pre, .modal pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.equivalents-explore { color: var(--mint); display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; font-size: 12px; font-weight: 600; }
+.text-button:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+#update-label { min-width: 10ch; }

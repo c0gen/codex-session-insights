@@ -203,4 +203,8 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log('Widget UI checks passed: settings, metrics, drag/menu, 240px layout, disclosure, keyboard, persistence, failed save, reduced motion and standalone report.');
+} catch (error) {
+  console.error("Widget page errors:", errors);
+  console.error(await context.pages().at(-1)?.locator("body").innerText());
+  throw error;
 } finally { await browser.close(); }

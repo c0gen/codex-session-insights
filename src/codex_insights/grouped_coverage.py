@@ -1,4 +1,5 @@
 """Coverage and token totals for many groups in one aggregate query."""
+from .metric_queries import source as metric_source
 from collections import defaultdict
 
 METRICS = ('total', 'input', 'cached', 'writes', 'output', 'reasoning')
@@ -46,7 +47,7 @@ def coverage_groups(db, table, where, params, group):
         'count(DISTINCT CASE WHEN c.segment_id IS NOT NULL THEN r.session_id END) sessions,'
         'count(DISTINCT CASE WHEN c.segment_id IS NOT NULL AND r.known_total>0 THEN r.session_id END) recorded_sessions,'
         "coalesce(sum(CASE WHEN r.kind='usage' THEN " + count + ' ELSE 0 END),0) observations,'
-        'coalesce(sum(r.total),0) total_tokens,' + columns + ' FROM ' + table + ' r' + joins +
+        'coalesce(sum(r.total),0) total_tokens,' + columns + ' FROM ' + metric_source(table, where) + joins +
         ' WHERE ' + where + ' GROUP BY ' + key + ',r.provider', params)
     groups = defaultdict(list)
     for row in rows:

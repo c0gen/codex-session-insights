@@ -34,7 +34,7 @@ def fixture(directory):
         cached = dict(db.execute('SELECT * FROM files').fetchone())
     # All files are byte-identical copies of the already verified history.
     # Seed checkpoints in one transaction so setup does not measure first indexing.
-    values, health = [], []
+    values, health, evidence = [], [], []
     for i in range(1, 10000):
         path = root / f'old-{i:05}.jsonl'
         path.write_bytes(content)
@@ -42,16 +42,18 @@ def fixture(directory):
         values.append((sid, str(path), cached['offset'], stat.st_mtime_ns, stat.st_size,
                        cached['anchor'], cached['state'], cached['parser_version']))
         health.append((sid, str(path), time.time(), None, 0, None))
+        evidence.append((sid, str(path), stat.st_size, stat.st_mtime_ns, 1767225600.0))
     with store.connect() as db:
         db.executemany('INSERT INTO files VALUES(?,?,?,?,?,?,?,?)', values)
         db.executemany('INSERT INTO file_coverage VALUES(?,?,?,?,?,?)', health)
+        db.executemany('INSERT INTO file_time_evidence VALUES(?,?,?,?,?)', evidence)
     active = root / 'active.jsonl'
     active.write_bytes(event('session_meta', {'id': 'active', 'cwd': 'synthetic'}))
     refresh(store)
     return store, root, sid, active
 
 
-def measure(directory, watchers, workload='idle', reconnect=False):
+def measure(directory, watchers, workload='idle', reconnect=False, display=False):
     store, root, sid, active = fixture(directory)
     if workload != 'idle':
         from copy import deepcopy
@@ -63,7 +65,7 @@ def measure(directory, watchers, workload='idle', reconnect=False):
             segments = []
             # Reconnect checks need maintenance to outlast the five-second
             # watcher coalescing window, even on a fast SSD.
-            for i in range(2400 if reconnect else 600):
+            for i in range(2400 if reconnect or display else 600):
                 fact = deepcopy(base)
                 provider = 'claude_code' if i % 10 == 0 else 'codex'
                 identity = f'historical-{i}'
@@ -89,6 +91,10 @@ def measure(directory, watchers, workload='idle', reconnect=False):
     jobs = Jobs()
     jobs.next_automatic = jobs.clock() + 5
     written, observed, failures = {}, {}, []
+    display_written = {}
+    maintenance_state = {'phase': 'waiting'}
+    import_started = threading.Event()
+    probe = None
     reconnected_during_maintenance = False
     observer = None
     class Events(FileSystemEventHandler):
@@ -100,6 +106,10 @@ def measure(directory, watchers, workload='idle', reconnect=False):
         observer = Observer()
         observer.schedule(Events(), str(root), recursive=True)
         observer.start()
+        store.live_paths.watcher_available = True
+    if display:
+        from live_burn_display import DisplayProbe
+        probe = DisplayProbe(store, jobs, display_written, directory / 'display.json', maintenance_state)
     if workload != 'idle':
         from codex_insights.cooperative import live_work
         def maintenance():
@@ -114,19 +124,26 @@ def measure(directory, watchers, workload='idle', reconnect=False):
                     else:
                         from codex_insights.transfers import export_snapshot, import_snapshot
                         incoming = directory / 'incoming.codex-insights'
+                        maintenance_state['phase'] = 'export'
                         export_snapshot(store, incoming)
+                        maintenance_state['phase'] = 'import'
+                        import_started.set()
                         import_snapshot(store, incoming, cancel=jobs.cancel)
             finally:
+                maintenance_state['phase'] = 'finished'
                 store.maintenance_cancel = None
         jobs.submit('Historical maintenance', maintenance, origin='user', key='maintenance', cancelable=True)
     def write():
         try:
+            if display and workload == 'import':
+                assert import_started.wait(30), 'Import did not begin'
             for i in range(1, 21):
                 at = datetime.now(timezone.utc).isoformat()
                 usage = dict(input_tokens=i * 100, output_tokens=0, total_tokens=i * 100)
                 with active.open('ab') as stream:
                     stream.write(event('event_msg', {'type': 'token_count', 'info': {'total_token_usage': usage}}, at))
                 written[at] = time.monotonic()
+                display_written[at] = {'epoch': time.time() * 1000, 'expected': i * 20, 'phase': maintenance_state['phase']}
                 time.sleep(.2)
         except Exception as error:
             failures.append(str(error))
@@ -161,11 +178,17 @@ def measure(directory, watchers, workload='idle', reconnect=False):
         ordered = sorted(observed.values())
         p95 = ordered[math.ceil(len(ordered) * .95) - 1]
         assert p95 <= (10 if watchers else 35), p95
+        displayed = probe.result() if probe else None
+        if displayed:
+            assert displayed['p95_seconds'] <= (10 if watchers else 35), displayed
         return {'watchers': watchers, 'workload': workload, 'historical_files': 10000, 'events': 20,
                 'p95_seconds': round(p95, 3), 'maximum_seconds': round(max(ordered), 3),
+                'displayed': displayed,
                 'reconnected_during_maintenance': reconnected_during_maintenance if reconnect else None}
     finally:
         jobs.close()
+        if probe:
+            probe.close()
         if observer:
             observer.stop()
             observer.join()
@@ -176,13 +199,14 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--workload', choices=('idle','rebuild','backfill','import'), default='idle')
     parser.add_argument('--reconnect', action='store_true', help='Verify offline source recovery during maintenance')
+    parser.add_argument('--display', action='store_true', help='Measure production browser poll/render latency too')
     args = parser.parse_args()
     if args.reconnect and args.workload == 'idle':
         parser.error('--reconnect requires a maintenance workload')
     args.output.mkdir(parents=True, exist_ok=False)
     results = []
     for name, watchers in (('watcher', True), ('fallback', False)):
-        result = measure(args.output / name, watchers, args.workload, args.reconnect)
+        result = measure(args.output / name, watchers, args.workload, args.reconnect, args.display)
         results.append(result)
         print(json.dumps(result), flush=True)
     (args.output / 'latency.json').write_text(json.dumps(results, indent=2), encoding='utf-8')

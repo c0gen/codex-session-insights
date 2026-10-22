@@ -59,7 +59,7 @@ def test_cache_invalidation_and_startup_privacy(indexed):
 def test_active_view_refresh_returns_previous_results_without_waiting(indexed, monkeypatch):
     from codex_insights import queries
     store, root = seed(indexed)
-    cache = DashboardCache(store)
+    cache = DashboardCache(store, min_interval=0)
     original = cache.read({'_view': 'overview'})
     with (root / '0.jsonl').open('ab') as stream:
         stream.write(token(500, 595))
@@ -190,7 +190,7 @@ def test_verified_old_pending_file_does_not_hide_live_freshness(indexed):
         stream.write(token(500, 999))
     scan.enqueue(indexed[2], root / '0.jsonl', urgent=True)
     partial = LocalTokenBurn(store, clock=lambda: now).read()
-    assert partial['partial']
+    assert partial['coverage']['freshness']['state'] == 'updating'
     assert partial['indexing']['live_pending_files'] == 1
 
 
@@ -294,7 +294,8 @@ def test_waiting_rates_still_report_current_live_progress(indexed):
         db.execute('INSERT INTO index_pending VALUES(?,?)', (indexed[2], str(root / 'unknown.jsonl')))
     rate = LocalTokenBurn(store, clock=lambda: now).read()
     assert rate['value'] is None and rate['status'] == 'collecting'
-    assert rate['indexing'] == {'live_checked_at': now - 70, 'live_pending_files': 1, 'historical_pending_files': 0}
+    assert {k: rate['indexing'][k] for k in ('live_checked_at', 'live_pending_files', 'historical_pending_files')} == {'live_checked_at': now - 70, 'live_pending_files': 1, 'historical_pending_files': 0}
+    assert rate['indexing']['freshness'] == 'delayed'
 
 
 def test_removed_response_owner_reprojects_only_its_former_competitors(indexed):
@@ -386,20 +387,21 @@ def test_import_yields_live_work_and_publishes_current_local_usage(indexed, tmp_
 
 def test_prepared_import_resumes_after_failed_publication(indexed, tmp_path, monkeypatch):
     from codex_insights.transfers import export_snapshot, import_snapshot
-    from codex_insights import isolated_jobs
+    from codex_insights import transfer_publication
     store, _ = seed(indexed, 1)
     path = tmp_path / 'snapshot.codex-insights'
     export_snapshot(store, path)
     destination = Store(tmp_path / 'target')
     destination.cooperate = lambda: None
-    original = isolated_jobs.publish
+    original = transfer_publication.publish
     def fail(*args): raise RuntimeError('interrupted publication')
-    monkeypatch.setattr(isolated_jobs, 'publish', fail)
+    monkeypatch.setattr(transfer_publication, 'publish', fail)
     with pytest.raises(RuntimeError):
         import_snapshot(destination, path)
     assert dashboard(destination)['summary']['total_tokens'] == 0
-    assert list((destination.directory / 'work').glob('source-*/work-state.json'))
-    monkeypatch.setattr(isolated_jobs, 'publish', original)
+    assert list((destination.directory / 'work').iterdir()) == []
+    assert destination.sources() == []
+    monkeypatch.setattr(transfer_publication, 'publish', original)
     destination.set_setting('timezone', 'Pacific/Auckland')
     resumed = Store(destination.directory)
     resumed.cooperate = lambda: None
@@ -410,17 +412,18 @@ def test_prepared_import_resumes_after_failed_publication(indexed, tmp_path, mon
 
 def test_prepared_import_cannot_replace_a_newer_accepted_revision(indexed, tmp_path, monkeypatch):
     from codex_insights.transfers import export_snapshot, import_snapshot
-    from codex_insights import isolated_jobs
+    from codex_insights import transfer_publication
     store, _ = seed(indexed, 1)
     path = tmp_path / 'snapshot.codex-insights'
     export_snapshot(store, path)
     destination = Store(tmp_path / 'target')
     destination.cooperate = lambda: None
-    monkeypatch.setattr(isolated_jobs, 'publish', lambda *args: (_ for _ in ()).throw(RuntimeError('interrupted')))
+    monkeypatch.setattr(transfer_publication, 'publish', lambda *args: (_ for _ in ()).throw(RuntimeError('interrupted')))
     with pytest.raises(RuntimeError):
         import_snapshot(destination, path)
     source_id = 'import:' + store.setting('exporter_id')
     with destination.connect() as db:
         db.execute("INSERT INTO sources(id,label,kind,revision) VALUES(?,'Newer accepted snapshot','import',2)", (source_id,))
-    assert import_snapshot(destination, path) == {'status': 'unchanged', 'revision': 2}
+    result = import_snapshot(destination, path)
+    assert result['status'] == 'unchanged' and result['revision'] == 2
     assert dashboard(destination)['summary']['total_tokens'] == 0

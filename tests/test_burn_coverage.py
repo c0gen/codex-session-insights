@@ -277,4 +277,5 @@ def test_never_invent_idle_zero_when_all_sources_have_pending_work(indexed):
         db.execute('INSERT INTO index_pending VALUES(?,?)', (sid, str(root / 'new.jsonl')))
     rate = LocalTokenBurn(store, clock=lambda: now).read()
     # A labeled observed subtotal can be zero; it must never be called complete.
-    assert rate['partial'] and 'indexing_delayed' in codes(rate)
+    assert rate['status'] == 'collecting' and rate['value'] is None
+    assert rate['coverage']['freshness']['state'] == 'updating'

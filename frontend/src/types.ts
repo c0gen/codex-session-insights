@@ -98,6 +98,7 @@ export interface Job {
   message: string;
   error: string | null;
   progress: {
+      checked?: number; reused?: number; added?: number; changed?: number; removed?: number; recalculated?: number;
     sessions?: number;
     phase?: string;
     files?: number;
@@ -138,6 +139,7 @@ export interface Equivalents {
   floppy_disks: number;
 }
 export interface Dashboard {
+  analytics_context?: string;
   cached_at?: string;
   analytics_refreshing?: boolean;
   loaded_view?: string;
@@ -198,6 +200,7 @@ export interface Filters {
   end: string;
 }
 export interface Dashboard {
+  analytics_context?: string;
   filters?: Filters;
   desktop?: DesktopState;
 }
@@ -251,7 +254,8 @@ export interface ProjectMerge {
   completed_at: string;
 }
 export interface BurnRateEstimate {
-  indexing?: { live_checked_at: number | null; live_pending_files: number; historical_pending_files: number };
+  indexing?: { live_checked_at: number | null; live_pending_files: number; historical_pending_files: number;
+    oldest_pending_at?: number | null; last_progress_at?: number | null; freshness?: "current" | "updating" | "delayed" };
   value: number | null;
   status: "collecting" | "available" | "stale" | "unavailable";
   observed_seconds: number;
@@ -261,6 +265,10 @@ export interface BurnRateEstimate {
     state: "complete" | "partial";
     checked_at: number | null;
     reasons: { code: string; label: string; count: number; source_id?: string; retry_at?: number }[];
+    freshness?: { state: "current" | "updating" | "delayed"; sources: {
+      source_id: string; source_label?: string; state: string; pending_files: number; pending_projections?: number; oldest_pending_at: number | null;
+      pending_age_seconds: number | null; last_progress_at: number | null; checked_at: number | null; overdue_seconds: number;
+    }[] };
   };
   detail?: string;
   /** Present on dollar estimates once local usage has been indexed. */
@@ -320,6 +328,7 @@ export interface ProviderAllowance {
   check?: ProviderCheck;
 }
 export interface ProviderSetup { target: string; status: string; installed?: boolean; upgrade_available?: boolean; error?: string; configuration?: unknown; path?: string }
-export interface Dashboard { provider_allowances?: ProviderAllowance[]; provider_setup?: ProviderSetup[];
+export interface Dashboard {
+  analytics_context?: string; provider_allowances?: ProviderAllowance[]; provider_setup?: ProviderSetup[];
   claude_recovery?: import('./claude-recovery').ClaudeRecovery; }
 export interface WidgetSummary { provider_allowances?: ProviderAllowance[]; }

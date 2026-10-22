@@ -19,9 +19,16 @@ def empty_local_rates(updated_at=None, **state):
 
 
 def indexing_state(coverage):
+    sources = coverage.get('freshness', {}).get('sources', [])
+    oldest = [s['oldest_pending_at'] for s in sources if s.get('oldest_pending_at') is not None]
+    progress = [s['last_progress_at'] for s in sources if s.get('last_progress_at') is not None]
     return {'live_checked_at': coverage.get('checked_at'),
             'live_pending_files': coverage.get('live_pending_files', 0),
-            'historical_pending_files': coverage.get('historical_pending_files', 0)}
+            'live_pending_projections': coverage.get('live_pending_projections', 0),
+            'historical_pending_files': coverage.get('historical_pending_files', 0),
+            'oldest_pending_at': min(oldest) if oldest else None,
+            'last_progress_at': max(progress) if progress else None,
+            'freshness': coverage.get('freshness', {}).get('state', 'current')}
 
 
 def cost_estimate(common, total, priced_tokens, cost, window_seconds):
@@ -93,7 +100,7 @@ class LocalTokenBurn:
                 return empty_local_rates(coverage={'state': 'partial', 'checked_at': None,
                     'reasons': [reason('coverage_unverified')]}, partial=True,
                     detail='Updating usage index. Verifying the accepted configuration.')
-            sources = db.execute("""SELECT id,updated,status FROM sources s WHERE kind='folder' AND enabled=1 AND provider='codex'
+            sources = db.execute("""SELECT id,label,updated,status FROM sources s WHERE kind='folder' AND enabled=1 AND provider='codex'
                 AND NOT (status='Offline' AND updated IS NULL
                     AND NOT EXISTS(SELECT 1 FROM files f WHERE f.source_id=s.id))
                 ORDER BY id""").fetchall()
@@ -110,13 +117,17 @@ class LocalTokenBurn:
             live = getattr(self.store, 'live_paths', None)
             health_revision = db.execute('SELECT revision FROM coverage_state WHERE id=1').fetchone()[0]
             metadata_revision = db.execute('SELECT revision FROM performance_state WHERE id=1').fetchone()[0]
-            coverage_key = (health_revision, metadata_revision, tuple(live.pending()) if live else (), ids)
+            coverage_key = (health_revision, metadata_revision, bool(live and getattr(live, 'watcher_available', False)), ids)
             if coverage_key != self.coverage_key or at >= self.coverage_expires or at < self.coverage_clock:
                 self.coverage_value = evaluate(db, sources, at, self.window_seconds, self.stale_seconds, live)
                 self.coverage_expires = self.coverage_value[0].pop('_expires_at', at + 1)
                 self.coverage_key = coverage_key
             self.coverage_clock = at
-            coverage, fresh = self.coverage_value
+            saved_coverage, fresh = self.coverage_value
+            coverage = deepcopy(saved_coverage)
+            for source in coverage.get('freshness', {}).get('sources', []):
+                if source.get('oldest_pending_at') is not None:
+                    source['pending_age_seconds'] = max(0, at - source['oldest_pending_at'])
             updated = coverage['checked_at']
             revision = db.execute("SELECT value FROM settings WHERE key='data_revision'").fetchone()
             partial = coverage['state'] != 'complete'
@@ -135,6 +146,10 @@ class LocalTokenBurn:
                 # A failed historical file or a long scan does not invalidate
                 # successfully indexed events. Disclose incomplete coverage.
                 # Without a fresh scan OR recent events, never invent an idle zero.
+                if not count and (coverage.get('live_pending_files') or coverage.get('live_pending_projections')) and coverage.get('freshness', {}).get('state') == 'updating':
+                    return empty_local_rates(updated, status='collecting', coverage=coverage,
+                        detail='Updating local usage. Waiting for the current file boundary to be indexed.',
+                        **({'partial': True} if partial else {}))
                 if not ready or not (any(fresh) or count):
                     detail = ("Waiting for a fresh local scan to finish."
                               if ready else "Local session folders are offline. Check Sources.")
@@ -142,7 +157,8 @@ class LocalTokenBurn:
                         return {kind: stale_estimate(rate, coverage, detail)
                                 for kind, rate in self.value.items()}
                     return empty_local_rates(updated, detail=detail, coverage=coverage,
-                                             status="collecting" if ready else "unavailable")
+                                             status="collecting" if ready else "unavailable",
+                                             **({'partial': True} if partial else {}))
                 common = {"status": "available", "observed_seconds": self.window_seconds,
                           "updated_at": updated, "coverage": coverage,
                           'indexing': indexing_state(coverage)}

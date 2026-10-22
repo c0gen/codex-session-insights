@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { filterFixture } from './dashboard-fixture.mjs';
+import { uiTestServer } from './ui-test-server.mjs';
 import { createServer } from '../frontend/node_modules/vite/dist/node/index.js';
 import { chromium, expect } from '../frontend/node_modules/@playwright/test/index.mjs';
 
 // An optional isolated server URL exercises production assets. API responses
 // remain synthetic in either mode; no live accounts or logs are accessed.
-const server = process.argv[2] ? null : await createServer({ root: 'frontend', configFile: false, server: { host: '127.0.0.1', port: 0 } });
-await server?.listen();
-const url = process.argv[2] || server.resolvedUrls.local[0];
+const production = process.argv.includes('--production');
+const server = production ? await uiTestServer() : process.argv[2] ? null : await createServer({ root: 'frontend', configFile: false, server: { host: '127.0.0.1', port: 0 } });
+if (!production) await server?.listen();
+const url = production ? server.url : process.argv[2] || server.resolvedUrls.local[0];
 const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge' });
 const defaults = filterFixture();
 const job = { running: false, message: '', error: null, progress: {}, revision: 1 };
@@ -41,6 +43,7 @@ await context.route('**/api/*', async route => {
     return route.fulfill({ json: fixture(args) });
   }
   if (action === 'export_html') { exports.push(args); return route.fulfill({json:{status:'cancelled'}}); }
+  if (action === 'live_status') return route.fulfill({json:{ready:true,job,desktop:{available:false},usage_limits:{enabled:false},provider_allowances:[]}});
   if (action === 'status') return route.fulfill({json:job});
   return route.fulfill({json:{}});
 });

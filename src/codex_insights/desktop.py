@@ -62,9 +62,15 @@ def run_desktop(engine, url, smoke_result=None, instance=None):
     controller = None
     if platform.system() == "Windows" and not engine.exporter and not smoke:
         from .desktop_controller import DesktopController
+        # `loaded` fires again for every page reload ("Try again" after a
+        # startup error); the tray, widget and activation listener exist once.
+        prepared = threading.Event()
 
         def prepare_native():
             nonlocal controller
+            if prepared.is_set():
+                return
+            prepared.set()
             try:
                 controller = engine.desktop = DesktopController(engine)
                 from .windows_desktop import WindowsDesktop
@@ -80,6 +86,8 @@ def run_desktop(engine, url, smoke_result=None, instance=None):
                 native_ready.set()
         if hasattr(engine, 'when_ready'):
             def prepare_when_ready():
+                if prepared.is_set():
+                    return
                 def dispatch():
                     if engine.stop.is_set():
                         return

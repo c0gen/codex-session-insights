@@ -2,8 +2,9 @@
 export class DeferredReload {
   private pending = false;
   private running = false;
+  private priority = false;
 
-  constructor(private reload: () => Promise<void>) {
+  constructor(private reload: (priority: boolean) => Promise<void>) {
     document.addEventListener("focusout", () => setTimeout(() => this.flush(), 0));
     document.addEventListener("input", (event) => {
       (event.target as Element).closest<HTMLElement>(".date-fields")?.setAttribute("data-unsaved", "true");
@@ -15,8 +16,9 @@ export class DeferredReload {
       !!document.activeElement?.matches("input,textarea,select,[contenteditable=true]");
   }
 
-  request() {
+  request(priority = false) {
     this.pending = true;
+    this.priority ||= priority;
     void this.flush();
   }
 
@@ -28,9 +30,11 @@ export class DeferredReload {
   async flush() {
     if (!this.pending || this.running || this.editing()) return;
     this.pending = false;
+    const priority = this.priority;
+    this.priority = false;
     this.running = true;
     try {
-      await this.reload();
+      await this.reload(priority);
     } finally {
       this.running = false;
       if (this.pending && !this.editing()) void this.flush();

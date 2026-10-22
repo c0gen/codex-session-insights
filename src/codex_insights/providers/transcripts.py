@@ -49,6 +49,8 @@ class TranscriptParser:
             self.state['version'] = PARSER_VERSION
 
     def consume(self, raw, end_offset):
+        # The indexer's event-time evidence reuses this decode; None means unbounded.
+        self.line_time = None
         s = self.state
         s["offset"], s["ordinal"] = end_offset, s["ordinal"] + 1
         s["hash"] = hashlib.sha256(s["hash"].encode() + raw).hexdigest()
@@ -61,6 +63,7 @@ class TranscriptParser:
             s["parse_errors"] += 1
             observe_record(s, None, raw)
             return
+        self.line_time = timestamp(e.get("timestamp"))
         observe_record(s, e)
         self.consume_event(e, end_offset)
 

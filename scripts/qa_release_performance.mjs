@@ -54,7 +54,7 @@ try {
     await expect(page.locator('h1')).toHaveText('Overview');
     await expect(page.locator('#cached-overview-notice')).toContainText('Cached overview');
     timings.push(performance.now()-started);
-    await expect(page.locator('#update-label')).toHaveText('Updated just now');
+    await expect(page.locator('#update-label')).toHaveText(/^Results · /);
   }
   assert(assets.every(url => !/gallery-.*\.js/.test(url)), 'Overview must not request the 3D chunk');
   const before = calls;

@@ -36,6 +36,13 @@ let failSummary = false, failSettings = false, failId = null, summaryReads = 0;
 const desktopReads = [];
 await context.route('**/api/*', async route => {
   const action = route.request().url().split('/').pop(), args = route.request().postDataJSON();
+  if (action === 'bootstrap') return route.fulfill({json:{ready:true,cached_overview:null}});
+  if (action === 'live_status') {
+    desktopReads.push({page:route.request().frame().url(),request:structuredClone(state.account_request)});
+    const response = await route.fetch(), data = await response.json();
+    data.desktop = state; data.accounts = accounts;
+    return route.fulfill({json:data});
+  }
   if (action === 'widget_layout' || action === 'widget_command') {
     commands.push({ action, args });
     return route.fulfill({ json: { status: 'accepted' } });
@@ -80,7 +87,7 @@ await widget.clock.install({ time: new Date(now * 1000) });
 await widget.addInitScript(() => {
   window.__layouts = [];
   window.pywebview = { api: { call: async (action, args) => {
-    if (action === 'widget_layout') window.__layouts.push(args);
+  if (action === 'widget_layout') window.__layouts.push(args);
     const token = document.querySelector('meta[name="insights-token"]')?.content || '';
     const response = await fetch('/api/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Insights-Token': token }, body: JSON.stringify(args) });
     const data = await response.json();
@@ -88,7 +95,12 @@ await widget.addInitScript(() => {
     return data;
   } } };
 });
-async function poll() { await widget.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); }
+async function poll() {
+  const response = widget.waitForResponse(value => value.url().endsWith('/api/widget_summary'));
+  await widget.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await (await response).finished();
+  await widget.waitForTimeout(50);
+}
 let dashboard;
 try {
   await widget.setViewportSize({ width: 240, height: 650 });

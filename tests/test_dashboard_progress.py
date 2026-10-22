@@ -19,7 +19,8 @@ def append(store, root, amount):
 
 def test_background_queries_publish_progress_before_writers_stop(indexed, monkeypatch):
     store, root, _ = seed(indexed)
-    cache = DashboardCache(store)
+    # Publication order, not the recompute throttle, is under test here.
+    cache = DashboardCache(store, min_interval=0)
     filters = {'_view': 'overview'}
     previous = cache.read(filters)
     real = queries.dashboard
@@ -46,6 +47,73 @@ def test_background_queries_publish_progress_before_writers_stop(indexed, monkey
         assert final['summary'] == real(store, filters)['summary']
     finally:
         cache.close()
+
+
+def test_background_recompute_is_throttled_under_constant_churn(indexed, monkeypatch):
+    store, root, _ = seed(indexed)
+    clock = [100.0]
+    cache = DashboardCache(store, min_interval=15, clock=lambda: clock[0])
+    filters = {'_view': 'overview'}
+    real = queries.dashboard
+    calls = []
+    def counted(*args):
+        calls.append(1)
+        return real(*args)
+    monkeypatch.setattr(queries, 'dashboard', counted)
+    try:
+        first = cache.read(filters)
+        generation = cache.generation
+        append(store, root, 300)
+        # Indexing just changed the identity, but a compute just finished.
+        shown = cache.read({**filters, '_background': True})
+        cache.executor.submit(lambda: None).result(timeout=5)
+        assert shown['analytics_refreshing'] and shown['revision'] == first['revision']
+        assert len(calls) == 1 and cache.generation == generation
+        # A refresh the user asked for is not throttled.
+        cache.read({**filters, '_background': True, '_retry': True})
+        cache.executor.submit(lambda: None).result(timeout=5)
+        assert len(calls) == 2 and cache.generation == generation + 1
+        generation = cache.generation
+        calls.clear()
+        calls.append(1)
+        append(store, root, 400)
+        cache.read({**filters, '_background': True})
+        cache.executor.submit(lambda: None).result(timeout=5)
+        assert len(calls) == 1 and cache.generation == generation
+        clock[0] += 15
+        cache.read({**filters, '_background': True})
+        cache.executor.submit(lambda: None).result(timeout=5)
+        assert len(calls) == 2 and cache.generation == generation + 1
+        latest = cache.read(filters)
+        assert latest['revision'] > first['revision'] and not latest.get('analytics_refreshing')
+        assert len(calls) == 2
+    finally:
+        cache.close()
+
+
+def test_closing_interrupts_a_running_aggregate_without_reporting_it(indexed, monkeypatch):
+    import time
+    from codex_insights.storage import tracked
+    store, root, _ = seed(indexed)
+    cache = DashboardCache(store, min_interval=0)
+    filters = {'_view': 'overview'}
+    cache.read(filters)
+    entered = threading.Event()
+    def endless(store, filters=None):
+        with store.connect() as db, tracked(store, db):
+            entered.set()
+            # Bounded so a regression fails the timing assertion instead of hanging the run.
+            db.execute('WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<300000000) '
+                       'SELECT count(*) FROM n').fetchone()
+            db.execute('SELECT count(*) FROM records').fetchone()
+    monkeypatch.setattr(queries, 'dashboard', endless)
+    append(store, root, 300)
+    cache.read({**filters, '_background': True})
+    assert entered.wait(5)
+    started = time.monotonic()
+    cache.close(timeout=10)
+    assert time.monotonic() - started < 5
+    assert not cache.errors and not cache.pending
 
 
 def test_older_concurrent_completion_cannot_replace_newer_snapshot(indexed, monkeypatch):
@@ -116,3 +184,21 @@ def test_query_identity_matches_transaction_even_when_write_follows_capture(inde
     assert result['revision'] == result.snapshot_key[1]
     assert result['summary']['total_tokens'] == 220
     assert queries.dashboard(store)['summary']['total_tokens'] == 440
+
+
+def test_completion_priority_bypasses_duration_cooldown(indexed):
+    store, root, _ = seed(indexed)
+    clock = [100.0]
+    cache = DashboardCache(store, clock=lambda: clock[0])
+    filters = {'_view': 'overview'}
+    try:
+        previous = cache.read(filters)
+        view_key = next(iter(cache.finished))
+        cache.durations[view_key] = 4  # Adaptive background cooldown is 8s.
+        append(store, root, 300)
+        assert cache.read({**filters, '_background': True})['revision'] == previous['revision']
+        priority = cache.read({**filters, '_background': True, '_retry': True})
+        assert priority['revision'] > previous['revision']
+        assert not priority.get('analytics_refreshing')
+    finally:
+        cache.close()

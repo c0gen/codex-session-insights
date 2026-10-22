@@ -8,6 +8,11 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS index_health(source_id TEXT PRIMARY KEY, discovered_at REAL,
  checked_at REAL, error TEXT);
 CREATE TABLE IF NOT EXISTS index_pending(source_id TEXT,path TEXT,PRIMARY KEY(source_id,path));
+CREATE TABLE IF NOT EXISTS pending_progress(source_id TEXT,path TEXT,oldest_pending_at REAL,last_progress_at REAL,
+ PRIMARY KEY(source_id,path));
+CREATE TABLE IF NOT EXISTS source_progress(source_id TEXT PRIMARY KEY,last_progress_at REAL);
+CREATE TABLE IF NOT EXISTS pending_origins(source_id TEXT,path TEXT,origin TEXT,PRIMARY KEY(source_id,path));
+CREATE TABLE IF NOT EXISTS projection_progress(segment_id TEXT PRIMARY KEY,oldest_pending_at REAL);
 CREATE TABLE IF NOT EXISTS file_coverage(source_id TEXT,path TEXT,checked_at REAL,
  affected_until REAL,issue_count INTEGER NOT NULL DEFAULT 0,reason TEXT,
  PRIMARY KEY(source_id,path));
@@ -25,7 +30,15 @@ CREATE INDEX IF NOT EXISTS coverage_issues ON file_coverage(source_id,affected_u
 
 def migrate(db):
     db.executescript(SCHEMA)
-    for table in ('sources', 'index_health', 'index_pending', 'file_coverage', 'index_retries', 'file_failures', 'projection_queue', 'pending_time_evidence'):
+    db.executescript('''CREATE TRIGGER IF NOT EXISTS pending_age_insert AFTER INSERT ON index_pending BEGIN
+        INSERT OR IGNORE INTO pending_progress VALUES(new.source_id,new.path,unixepoch('now'),NULL); END;''')
+    db.executescript('''CREATE TRIGGER IF NOT EXISTS projection_age_insert AFTER INSERT ON projection_queue BEGIN
+        INSERT OR IGNORE INTO projection_progress VALUES(new.segment_id,unixepoch('now')); END;
+        CREATE TRIGGER IF NOT EXISTS projection_age_delete AFTER DELETE ON projection_queue BEGIN
+        DELETE FROM projection_progress WHERE segment_id=old.segment_id; END;''')
+    db.execute("INSERT OR IGNORE INTO pending_progress SELECT source_id,path,unixepoch('now'),NULL FROM index_pending")
+    db.execute("INSERT OR IGNORE INTO projection_progress SELECT segment_id,unixepoch('now') FROM projection_queue")
+    for table in ('sources', 'index_health', 'index_pending', 'pending_progress', 'pending_origins', 'source_progress', 'projection_progress', 'file_coverage', 'index_retries', 'file_failures', 'projection_queue', 'pending_time_evidence'):
         for event in ('INSERT', 'UPDATE', 'DELETE'):
             db.executescript(f'''CREATE TRIGGER IF NOT EXISTS coverage_{table}_{event} AFTER {event} ON {table}
                 BEGIN UPDATE coverage_state SET revision=revision+1 WHERE id=1; END;''')
@@ -57,11 +70,29 @@ def event_time_bound(path, size):
     return latest
 
 
-def file_checked(db, source_id, path, *, issues=0, bound=None, reason=None):
+def checkpoints(db, source, path=None):
+    """Coverage verifies the same captured bytes, and pending work must retire."""
+    return db.execute('SELECT f.path,f.size,f.mtime,f.parser_version,p.path AS pending,'
+        'CASE WHEN e.size=f.size AND e.mtime=f.mtime THEN c.checked_at END AS verified FROM files f '
+        'LEFT JOIN file_coverage c ON c.source_id=f.source_id AND c.path=f.path '
+        'LEFT JOIN file_time_evidence e ON e.source_id=f.source_id AND e.path=f.path '
+        'LEFT JOIN index_pending p ON p.source_id=f.source_id AND p.path=f.path '
+        'WHERE f.source_id=?' + (' AND f.path=?' if path is not None else ''),
+        (source, str(path)) if path is not None else (source,))
+
+
+def file_checked(db, source_id, path, *, issues=0, bound=None, reason=None, progress=False):
     db.execute('INSERT OR REPLACE INTO file_coverage VALUES(?,?,?,?,?,?)',
                (source_id, str(path), time.time(), bound, issues, reason))
     db.execute('DELETE FROM index_pending WHERE source_id=? AND path=?', (source_id, str(path)))
     db.execute('DELETE FROM pending_time_evidence WHERE source_id=? AND path=?', (source_id, str(path)))
+    # The captured boundary has completed. A subsequent append starts a fresh
+    # pending interval; unreadable retries retain their original oldest age.
+    if reason != 'file_error':
+        if progress:
+            db.execute('INSERT OR REPLACE INTO source_progress VALUES(?,?)', (source_id, time.time()))
+        db.execute('DELETE FROM pending_progress WHERE source_id=? AND path=?', (source_id, str(path)))
+        db.execute('DELETE FROM pending_origins WHERE source_id=? AND path=?', (source_id, str(path)))
 
 
 def source_checked(db, source_id, at=None, error=None, discovered=False):
@@ -73,7 +104,7 @@ def source_checked(db, source_id, at=None, error=None, discovered=False):
 
 
 def forget(db, source_id):
-    for table in ('index_health', 'index_pending', 'file_coverage', 'index_retries', 'file_time_evidence', 'pending_time_evidence'):
+    for table in ('index_health', 'index_pending', 'pending_progress', 'pending_origins', 'source_progress', 'file_coverage', 'index_retries', 'file_time_evidence', 'pending_time_evidence'):
         db.execute(f'DELETE FROM {table} WHERE source_id=?', (source_id,))
 
 

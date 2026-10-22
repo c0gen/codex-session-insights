@@ -32,26 +32,39 @@ export function restoreFilters(raw: string | null) {
   }
 }
 
-type Request = { id: number; filters: Filters; draft: Filters };
+export type RequestIntent = "initial" | "apply" | "navigation" | "refresh" | "retry" | "background";
+type Request = { id: number; intent: RequestIntent; filters: Filters; draft: Filters; scope: string };
 
-/** Draft controls, in-flight request, and displayed response have separate lifetimes. */
+/** Draft controls, submitted requests, and accepted results have independent lifetimes. */
 export class FilterState {
   draft: Filters;
+  private initial: Filters;
   private applied: Filters | null = null;
   private pending: Request | null = null;
+  private failed: Request | null = null;
+  private failures = new Map<string, { request: Request; message: string }>();
+  private scope = "";
   private sequence = 0;
-  error: string | null = null;
+  interaction = 0;
+  get error() { return this.failures.get(this.scope)?.message ?? null; }
 
   get loading() { return this.pending !== null; }
+  get hasApplied() { return this.applied !== null; }
 
-  constructor(initial: Filters) { this.draft = { ...initial }; }
+  constructor(initial: Filters) { this.initial = { ...initial }; this.draft = { ...initial }; }
 
-  begin(automatic = false): Request | null {
-    if (automatic && (this.pending || this.error)) return null;
-    const filters = validateFilters(automatic && this.applied ? this.applied : this.draft);
-    const request = { id: ++this.sequence, filters, draft: { ...this.draft } };
+  begin(intent: RequestIntent = "apply", scope = ""): Request | null {
+    this.failed = intent === "retry" ? this.failures.get(this.scope)?.request ?? null : null;
+    if (intent === "background" && (this.pending || this.error)) return null;
+    const snapshot = intent === "apply" ? this.draft
+      : intent === "retry" && this.failed ? this.failed.filters
+      : this.pending?.filters ?? this.applied ?? this.initial;
+    const filters = validateFilters(snapshot);
+    this.scope = JSON.stringify([scope, filters]);
+    if (intent !== "background" && intent !== "initial") this.interaction++;
+    const request = { id: ++this.sequence, intent, filters, draft: { ...this.draft }, scope: this.scope };
     this.pending = request;
-    this.error = null;
+    // Keep a failed update visible until a replacement succeeds.
     return request;
   }
 
@@ -64,18 +77,21 @@ export class FilterState {
   fail(request: Request, message: string) {
     if (!this.current(request)) return;
     this.pending = null;
-    this.error = message;
+    this.failed = request;
+    this.failures.set(request.scope, { request, message });
   }
 
   accept(request: Request, response: unknown = request.filters): Filters | null {
     if (!this.current(request)) return null;
     const applied = validateFilters(response);
     this.applied = applied;
-    // Resolve server-normalized IDs, but never replace edits made during a request.
+    // Resolve normalized IDs only when the corresponding draft was submitted.
     for (const key of keys) {
       if (this.draft[key] === request.draft[key] && request.draft[key] === request.filters[key]) this.draft[key] = applied[key] ?? "";
     }
     this.pending = null;
+    this.failed = null;
+    this.failures.delete(request.scope);
     return { ...applied };
   }
 

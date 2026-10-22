@@ -35,9 +35,9 @@ def refresh(store, progress=None, cancel=None, rebuild=False, automatic=False):
         # This phase runs outside the recovery publication transaction.
         if value.get('phase') == 'Recovering Claude history':
             live.hints()
-            if time.monotonic() - live.last_inventory >= 30:
-                live.inventory()
             deadline = time.monotonic() + .25
+            if live.walk is not None or live.inventory_due(getattr(hints, 'discovery_interval', 30)):
+                live.advance_inventory(deadline)
             while live.tasks and time.monotonic() < deadline and not live.cancelled():
                 live.step()
             live.finalize(deadline)

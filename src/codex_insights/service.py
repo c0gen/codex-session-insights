@@ -1,7 +1,9 @@
 """Shared app/exporter orchestration, background jobs and native-dialog API."""
 import json
+import logging
 import platform
 import threading
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -19,6 +21,8 @@ from .claude_usage import ClaudeUsage
 from .antigravity_usage import AntigravityUsage
 from .local_token_burn import LocalTokenBurn
 from .live_index import LivePaths
+
+log = logging.getLogger(__name__)
 
 
 class Engine:
@@ -66,6 +70,9 @@ class Engine:
         # expensive maintenance until its window is visible.
         if not defer_projection:
             ensure_projection(self.store)
+            from .buckets import VERSION as BUCKET_VERSION, rebuild_buckets
+            if self.store.setting('bucket_version') != BUCKET_VERSION:
+                rebuild_buckets(self.store, resume=True)
         self.accounts = Accounts(self.store.directory, current_provider=allowance_provider,
                                  enabled=self.store.setting("live_usage_enabled", True),
                                  allowed=not (self.store.setting("demo", False) or exporter))
@@ -114,20 +121,21 @@ class Engine:
         self._started = True
         from .projection_state import needs_rebuild
         if (needs_rebuild(self.store, PROJECTION_VERSION)
-                or self.store.setting('bucket_version') != 1 or self.store.setting('project_groups_version') != 1):
+                or self.store.setting('bucket_version') != 2 or self.store.setting('project_groups_version') != 1):
             def maintenance():
                 ensure_projection(self.store, self.progress)
                 if self.store.setting('project_groups_version') != 1:
                     project_groups.migrate(self.store, self.progress, self.stop)
-                if self.store.setting('bucket_version') != 1:
+                if self.store.setting('bucket_version') != 2:
                     from .buckets import rebuild_buckets
-                    rebuild_buckets(self.store)
+                    rebuild_buckets(self.store, resume=True)
             self.submit('Updating usage index', maintenance, origin="user", key="index-upgrade")
         self.accounts.start()
         self.claude_usage.start()
         self.antigravity_usage.start()
         if self.store.setting("demo", False):
             return
+        threading.Thread(target=self._prune_backups, daemon=True, name="insights-backups").start()
         self.refresh(automatic=True)
         self.configure_watchers()
         def watch():
@@ -139,6 +147,13 @@ class Engine:
                     self.refresh(automatic=True)
         self.watch_thread = threading.Thread(target=watch,daemon=True)
         self.watch_thread.start()
+
+    def _prune_backups(self):
+        try:
+            from .backup_retention import prune_upgrade_backups
+            prune_upgrade_backups(self.store)
+        except Exception:
+            log.exception("Could not check upgrade backups")
 
     def configure_watchers(self):
         if self.observer:
@@ -166,24 +181,52 @@ class Engine:
                     else:
                         observer.schedule(Events(source), source["root"], recursive=True)
             observer.start(); self.observer = observer
+            self.store.live_paths.watcher_available = True
         except (ImportError,OSError):
             self.observer = None
 
-    def close(self):
+    def begin_close(self):
+        """Signal every worker to wind down without waiting; safe on the GUI thread."""
         self.stop.set(); self.cancel.set()
-        self.accounts.close()
-        self.claude_usage.close()
-        self.antigravity_usage.close()
-        if getattr(self, "watch_thread", None):
-            self.watch_thread.join(timeout=3)
-        self.jobs.close()
-        self.dashboard_cache.close()
+        self.dashboard_cache.begin_close()
+        self.accounts.begin_close()
+        self.claude_usage.begin_close()
+        self.antigravity_usage.begin_close()
         if self.observer:
-            self.observer.stop(); self.observer.join(timeout=3)
+            self.observer.stop()
 
+    def close(self, timeout=8):
+        """Release workers within one deadline; work left running is redone next launch."""
+        deadline = time.monotonic() + timeout
+        remaining = lambda: max(0.0, deadline - time.monotonic())
+        timings = []
+        def phase(name, action):
+            started = time.monotonic()
+            try:
+                action()
+            except Exception:
+                log.exception("Shutdown phase failed: %s", name)
+            timings.append(f"{name} {time.monotonic() - started:.1f}s")
+        self.begin_close()
+        phase("accounts", lambda: self.accounts.close(timeout=remaining()))
+        phase("usage checks", lambda: (self.claude_usage.close(), self.antigravity_usage.close()))
+        if getattr(self, "watch_thread", None):
+            phase("watcher", lambda: self.watch_thread.join(timeout=min(3, remaining())))
+        def jobs():
+            # Cooperative work stops at its next cancellation check; a report or
+            # export still aggregating is interrupted after a short grace.
+            if not self.jobs.close(timeout=min(2, remaining())):
+                self.store.readers.interrupt()
+                if not self.jobs.close(timeout=remaining()):
+                    log.warning("Indexing work is still running at shutdown; it resumes on next launch")
+        phase("jobs", jobs)
+        phase("analytics", lambda: self.dashboard_cache.close(timeout=remaining()))
+        if self.observer:
+            phase("file watchers", lambda: self.observer.join(timeout=min(3, remaining())))
         if self.desktop:
             self.desktop.dispose()
             self.desktop = None
+        log.info("Engine closed in %.1fs (%s)", timeout - remaining(), ", ".join(timings))
 
     def choose(self, kind, filename=""):
         if not self.window:
@@ -213,7 +256,8 @@ class Engine:
             value = {'ready': True, 'projection': pending, 'job': self.call('status'), 'desktop': self.call('desktop_state'),
                      'usage_limits': {**self.accounts.current_allowance(), **rates},
                      'provider_allowances': self.provider_allowances(), 'account_token_total': self.accounts.token_total(),
-                     'indexing': rates.get('token_burn_rate', {}).get('indexing')}
+                     'indexing': rates.get('token_burn_rate', {}).get('indexing'),
+                     'analytics_generation': self.dashboard_cache.generation}
             if include_accounts:
                 value['accounts'] = {**self.accounts.read(), **rates}
             return value
@@ -295,6 +339,8 @@ class Engine:
             return value
         if action == "dashboard":
             data = self.dashboard_cache.read(args)
+            from .source_status import decorate
+            decorate(self.store, data)
             data["provider_allowances"] = self.provider_allowances()
             data["provider_setup"] = self.provider_setup.states()
             data["job"] = self.jobs.snapshot()

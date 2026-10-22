@@ -91,8 +91,12 @@ class DesktopController:
         if self.quitting:
             return
         self.quitting = True
-        self.engine.stop.set()
-        self.engine.cancel.set()
+        begin_close = getattr(self.engine, "begin_close", None)
+        if begin_close:
+            begin_close()
+        else:
+            self.engine.stop.set()
+            self.engine.cancel.set()
         self.native.remove_tray()
         self.tray_active = False
         self.native.remove_widget()

@@ -1,8 +1,10 @@
 """Desktop and automation entry points."""
 import argparse
 import json
+import logging
 import os
 import platform
+import threading
 import time
 from pathlib import Path
 
@@ -14,6 +16,48 @@ from .service import Engine
 from .transfers import import_snapshot
 from .snapshot_export import export_usage
 from .paths import default_directory
+
+SHUTDOWN_DEADLINE = 10
+
+
+def close_windowed(engine, instance, baseline, deadline=SHUTDOWN_DEADLINE):
+    """Close a windowed app within the deadline, then end the process.
+
+    concurrent.futures joins its worker threads at interpreter exit, so a
+    long parse or aggregate would keep a closed window's process alive and
+    block the next launch. SQLite's WAL keeps the index consistent, and work
+    left unfinished resumes on the next launch.
+    """
+    end = time.monotonic() + deadline
+    finished = threading.Event()
+    def close():
+        try:
+            engine.close()
+        except Exception:
+            logging.exception("Shutdown failed")
+        finally:
+            finished.set()
+    threading.Thread(target=close, daemon=True, name='insights-shutdown').start()
+    finished.wait(deadline)
+    def busy():
+        return [t for t in threading.enumerate() if t.is_alive() and not t.daemon and t not in baseline
+                and t is not threading.current_thread()]
+    for thread in busy():
+        thread.join(timeout=max(0, end - time.monotonic()))
+    remaining = busy()
+    if finished.is_set() and not remaining:
+        return
+    logging.warning("Shutdown exceeded %ss; ending with work still running: %s", deadline,
+                    ", ".join(sorted(t.name for t in remaining)) or "engine close")
+    if instance:
+        instance.close()
+    logging.info("App exited with code 0")
+    for handler in logging.getLogger().handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+    os._exit(0)
 
 
 def main(argv=None):
@@ -69,8 +113,15 @@ def main(argv=None):
         from .single_instance import SingleInstance
         instance = SingleInstance(directory)
         if not instance.owner:
+            shown = instance.acknowledged
             instance.close()
+            if not shown:
+                raise RuntimeError("The previous Codex Session Insights window is still closing. Try again in a moment.")
             return 0
+        if instance.handed_over:
+            logging.info("Started after the previous window finished closing")
+    # Threads alive before launch are not this app's work to wait for at exit.
+    baseline = set(threading.enumerate())
     engine = None
     try:
         if args.command in ('gui', 'exporter'):
@@ -119,7 +170,9 @@ def main(argv=None):
         return 0
     finally:
         try:
-            if engine:
+            if engine and args.command in ('gui', 'exporter'):
+                close_windowed(engine, instance, baseline)
+            elif engine:
                 engine.close()
         finally:
             if instance:

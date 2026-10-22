@@ -134,7 +134,8 @@ class ClaudeUsage(PollingCache):
     def __init__(self, directory, provider=None, enabled=False, allowed=True, clock=time.time,
                  interval=300, max_backoff=1800):
         provider = provider or ClaudeUsageProvider(Path(directory) / "claude-usage")
+        # Retries never run `claude` more often than a healthy check does.
         super().__init__(provider, provider.fetch, normalize_report, lambda value: bool(value["buckets"]),
                          {"buckets": []}, enabled=enabled, allowed=allowed, clock=clock, interval=interval,
-                         max_backoff=max_backoff, missing_code="no_limits",
+                         max_backoff=max_backoff, backoff_base=interval, missing_code="no_limits",
                          missing_message="Claude Code reported no plan limits for this sign-in.")

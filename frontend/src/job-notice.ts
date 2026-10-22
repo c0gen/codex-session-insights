@@ -1,6 +1,7 @@
 import type { Job } from "./types";
 import { compact } from "./format";
 import { count } from "./ui";
+import { incrementalCounts } from "./import-progress";
 
 type Notice = { message: string; title: string; queue: string; busy: boolean; cancelable: boolean; until: number };
 let notice: Notice | undefined;
@@ -41,7 +42,8 @@ export function showJobNotice(job: Job, cancel: () => void) {
   const queued = job.queued || [];
   if (foreground || queued.length) {
     const progress = job.progress || {};
-    const detail = progress.sessions
+    const imported = incrementalCounts(progress);
+    const detail = imported ? ` · ${imported}` : progress.sessions
       ? ` · ${count(progress.sessions)} session facts`
       : progress.files ? ` · ${count(progress.files)} files checked · ${compact((progress.bytes_read || 0) / 1024 / 1024)} MB read` : "";
     notice = {
@@ -54,7 +56,8 @@ export function showJobNotice(job: Job, cancel: () => void) {
     const state = completed?.state || job.state;
     const label = state === "failed" ? "Failed" : state === "cancelled" ? "Cancelled" : "Completed";
     const title = completed?.message || notice?.title || job.message;
-    notice = { title, message: `${title} · ${label}`, queue: "", busy: false, cancelable: false,
+    const imported = incrementalCounts(completed?.result);
+    notice = { title, message: `${title} · ${label}${imported ? ` · ${imported}` : ''}`, queue: "", busy: false, cancelable: false,
       until: performance.now() + readableMilliseconds };
   }
   observed = true;

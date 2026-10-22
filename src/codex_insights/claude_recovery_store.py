@@ -61,6 +61,13 @@ def save_report(db, source, state, report, signature=''):
                (source, VERSION, state, signature, json.dumps(report)))
 
 
+def retire_verification(db, source, revision):
+    """No current Claude contribution remains; preserve the historical report."""
+    db.execute('DELETE FROM claude_identity_issues WHERE source_id=?', (source,))
+    db.execute("UPDATE claude_recovery_sources SET state='complete',report=json_set(report,"
+        "'$.unresolved_groups',0,'$.legacy_snapshot_without_alternatives',json('false'),'$.import_revision',?) WHERE source_id=?", (revision, source))
+
+
 def status(db):
     rows = [dict(r) for r in db.execute('SELECT * FROM claude_recovery_sources ORDER BY source_id')]
     reports = [{**json.loads(r['report']), 'source_id': r['source_id'], 'state': r['state']} for r in rows]

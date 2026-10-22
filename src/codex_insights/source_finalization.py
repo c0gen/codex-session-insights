@@ -57,12 +57,13 @@ def finish(scan, sid):
 def advance(scan, deadline=None):
     """Return whether eligible completion work remains; each step is bounded."""
     deadline = time.monotonic() + .25 if deadline is None else deadline
+    # Only this scan's queued work delays completion. Watcher hints arrive for
+    # as long as a session is being written; they belong to the next scan and
+    # stay visible as pending/live coverage, so they must not defer it forever.
     blocked = {sid for sid, _ in scan.tasks}
-    if scan.live:
-        blocked.update(sid for sid, _ in scan.live.pending())
     for sid in sorted(scan.complete - scan.finalized - blocked):
         while not scan.cancelled() and time.monotonic() < deadline:
-            if any(source == sid for source, _ in scan.tasks) or (scan.live and any(source == sid for source, _ in scan.live.pending())):
+            if any(source == sid for source, _ in scan.tasks):
                 break
             if not current(scan, sid):
                 scan.complete.discard(sid)

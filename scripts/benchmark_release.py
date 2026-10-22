@@ -53,6 +53,9 @@ else:
             source.backup(target, pages=1024, progress=copy_progress)
 started = time.perf_counter()
 store = Store(args.output)
+from codex_insights.buckets import current, rebuild_buckets
+if not current(store.setting('bucket_version')):
+    rebuild_buckets(store, resume=True)
 result = {'fixture': str(args.fixture), 'sqlite': sqlite3.sqlite_version,
           'migration_seconds': round(time.perf_counter() - started, 3), 'runs': args.runs}
 def measure(label, action):
@@ -66,8 +69,15 @@ def measure(label, action):
                      'min_seconds': round(readings[0], 4)}
     print(json.dumps({label: result[label]}), flush=True)
     return value
-full = measure('full_dashboard', lambda: dashboard(store))
-overview = measure('overview', lambda: dashboard(store, {'_view': 'overview'}))
+from codex_insights.dashboard_aggregates import SharedAggregates
+def fresh(view):
+    store._dashboard_aggregates = SharedAggregates(32)
+    return dashboard(store, {'_view': view})
+full = measure('full_dashboard', lambda: fresh('full'))
+overview = measure('overview', lambda: fresh('overview'))
+measure('projects', lambda: fresh('projects'))
+measure('usage', lambda: fresh('usage'))
+measure('sources', lambda: fresh('sources'))
 assert overview['summary'] == full['summary']
 assert overview['timeline'] == full['timeline']
 cache = DashboardCache(store)

@@ -18,7 +18,7 @@ function content(data: Dashboard, basis: EquivalentBasis) {
 
 export function textEquivalents(data: Dashboard, basis: EquivalentBasis) {
   const parts = content(data, basis);
-  return `<section id="text-equivalents" class="panel equivalents"><div class="panel-heading"><div><h2>Text equivalents</h2><button class="equivalents-explore" data-page="visualizations">Explore in 3D →</button></div>${segment("basis", [["total", "Total processed"], ["output", "Output only"]], basis)}</div><div id="text-equivalent-values" class="equivalent-grid">${parts.values}</div><div class="equivalent-notes"><div id="text-equivalent-notes">${parts.notes}</div><button id="equivalents-more" class="text-button">Show all equivalents ${icon("chevron", 15)}</button></div><div id="extra-equivalents" class="extra-equivalents" hidden>${parts.extra}</div></section>`;
+  return `<section id="text-equivalents" class="panel equivalents"><div class="panel-heading"><div><h2>Text equivalents</h2><button class="text-button equivalents-explore" data-page="visualizations">Explore in 3D →</button></div>${segment("basis", [["total", "Total processed"], ["output", "Output only"]], basis)}</div><div id="text-equivalent-values" class="equivalent-grid">${parts.values}</div><div class="equivalent-notes"><div id="text-equivalent-notes">${parts.notes}</div><button id="equivalents-more" class="text-button">Show all equivalents ${icon("chevron", 15)}</button></div><div id="extra-equivalents" class="extra-equivalents" hidden>${parts.extra}</div></section>`;
 }
 
 /** Account polling updates numbers without replacing controls, focus or disclosure. */

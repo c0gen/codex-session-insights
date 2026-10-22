@@ -96,6 +96,7 @@ def test_dashboard_query_count_is_independent_of_project_count(tmp_path, monkeyp
         result = dashboard(store)
         assert len(result['projects']) == projects
         selects = [sql for sql in statements if sql.startswith('SELECT')]
-        assert len([sql for sql in selects if ' group_id,' in sql]) == 2
+        assert len([sql for sql in selects if ' group_id,' in sql]) == 1
+        assert len([sql for sql in statements if sql.startswith('WITH memberships')]) == 1
         counts.append(len(selects))
     assert counts[0] == counts[1]

@@ -10,7 +10,8 @@ class LiveMaintenance:
         self.scan = None
 
     def __call__(self):
-        if self.busy or (self.cancel and self.cancel.is_set()):
+        # A running Scan already services watcher hints between its own batches.
+        if self.busy or getattr(self.store, 'active_scans', 0) or (self.cancel and self.cancel.is_set()):
             return
         self.busy = True
         try:
@@ -24,10 +25,13 @@ class LiveMaintenance:
                 report = dict(files=0, changed_files=0, bytes_read=0, errors=0, skipped_errors=0)
                 self.scan = Scan(self.store, sources, report, cancel=self.cancel, automatic=True)
             self.scan.hints()
-            if live.discovery_due():
-                live.begin_discovery()
-                self.scan.inventory()
             deadline = time.monotonic() + .25
+            # Discovery shares this slice's budget; a large history resumes next call.
+            if self.scan.walk is None and live.discovery_due():
+                live.begin_discovery()
+                self.scan.advance_inventory(deadline)
+            elif self.scan.walk is not None:
+                self.scan.advance_inventory(deadline)
             self.scan.finalize(deadline)
             while self.scan.tasks and time.monotonic() < deadline and not self.scan.cancelled():
                 self.scan.step()

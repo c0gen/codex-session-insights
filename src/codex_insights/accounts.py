@@ -1,5 +1,6 @@
 """Concurrent connections, independent of the analytics/indexing transaction queue."""
 import threading
+import time
 import uuid
 import webbrowser
 
@@ -208,14 +209,21 @@ class Accounts:
             thread.start()
         return {"status": "removed"}
 
-    def close(self):
+    def begin_close(self):
+        """Stop every reader without waiting; safe on the GUI thread."""
         with self.lock:
             self.closed = True
             monitors = list(self.monitors.values())
             for monitor in monitors:
                 monitor.begin_close()
+        return monitors
+
+    def close(self, timeout=None):
+        deadline = None if timeout is None else time.monotonic() + timeout
+        monitors = self.begin_close()
         self.login.close()
         for monitor in monitors:
             monitor.close()
+        # Removed accounts finish signing out within their own bounded timeout.
         for thread in self.cleanup_threads:
-            thread.join(timeout=17)
+            thread.join(timeout=17 if deadline is None else max(0, min(17, deadline - time.monotonic())))

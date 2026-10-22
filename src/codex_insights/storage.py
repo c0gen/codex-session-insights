@@ -3,7 +3,7 @@ import json
 import sqlite3
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from .codec import pack, unpack
@@ -43,12 +43,53 @@ CREATE INDEX IF NOT EXISTS records_model ON records(model,ts);
 """
 
 
+class Readers:
+    """Long analytics reads that shutdown may interrupt; writers are never registered."""
+    def __init__(self):
+        self.lock, self.active = threading.Lock(), {}
+
+    @contextmanager
+    def track(self, db):
+        # sqlite3_interrupt() is cleared when the next statement starts, and an
+        # aggregate runs many. The progress handler also stops later statements.
+        cancelled = threading.Event()
+        db.set_progress_handler(cancelled.is_set, 10000)
+        with self.lock:
+            self.active[db] = cancelled
+        try:
+            yield db
+        finally:
+            with self.lock:
+                self.active.pop(db, None)
+            try:
+                db.set_progress_handler(None, 0)
+            except sqlite3.ProgrammingError:
+                pass
+
+    def interrupt(self):
+        """Abort reads open now; connections opened afterwards are unaffected."""
+        with self.lock:
+            active = list(self.active.items())
+        for db, cancelled in active:
+            cancelled.set()
+            try:
+                db.interrupt()
+            except sqlite3.ProgrammingError:
+                pass  # Closed between the snapshot and the interrupt.
+
+
+def tracked(store, db):
+    readers = getattr(store, 'readers', None)
+    return readers.track(db) if isinstance(readers, Readers) else nullcontext(db)
+
+
 class Store:
     def __init__(self, directory):
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.path = self.directory / "insights.sqlite3"
         self.lock = threading.RLock()
+        self.readers = Readers()
         from .copy_migration import backup_before_upgrade
         backup_before_upgrade(self.path)
         with self.connect() as db:
@@ -67,6 +108,8 @@ class Store:
             from .providers.schema import migrate
             migrate(db)
             ensure_schema(db)
+            from .transfer_fingerprints import ensure_schema as fingerprint_schema
+            fingerprint_schema(db)
             project_groups.ensure_schema(db)
             from .copy_migration import migrate as migrate_copies
             migrate_copies(db)
@@ -79,7 +122,7 @@ class Store:
             if not db.execute("SELECT 1 FROM settings WHERE key='exporter_id'").fetchone():
                 db.execute("INSERT INTO settings VALUES('exporter_id',?)", (json.dumps(str(uuid.uuid4())),))
             if not db.execute('SELECT 1 FROM records LIMIT 1').fetchone():
-                db.execute("INSERT OR REPLACE INTO settings VALUES('bucket_version','1')")
+                db.execute("INSERT OR REPLACE INTO settings VALUES('bucket_version','2')")
 
     @contextmanager
     def connect(self):

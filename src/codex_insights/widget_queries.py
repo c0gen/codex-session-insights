@@ -1,4 +1,5 @@
 """Revision-cached widget summaries; never scan files or build dashboard charts."""
+from .buckets import current as current_buckets
 import json
 import threading
 from datetime import datetime, timezone
@@ -33,7 +34,7 @@ class WidgetSummaries:
             states = source_states(db)
             key = (revision, zone_name, today, settings.get("bucket_version"), tuple(sorted(states.items())))
             if key != self.key:
-                table = "metric_buckets" if settings.get("bucket_version") == 1 else "records"
+                table = "metric_buckets" if current_buckets(settings.get("bucket_version")) else "records"
                 value = {"timezone": zone_name, "date": today.isoformat(), "revision": revision,
                          "generated_at": now.isoformat(), 'source_states': states}
                 for name, selected in (("today", "today"), ("all_time", "all")):

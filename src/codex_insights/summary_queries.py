@@ -1,4 +1,5 @@
 """Shared headline aggregation for the dashboard and small desktop surfaces."""
+from .metric_queries import source as metric_source
 
 
 def edit_expressions(table, end):
@@ -15,12 +16,17 @@ def query_summary(db, table, where, params, end, extras=None):
     fields += ',sum(r.completion_unavailable) edit_completion_time_unavailable'
     if extras is not None:
         fields += ",sum(CASE WHEN r.kind='usage' THEN r.cache_discount ELSE 0 END) cache_discount,sum(CASE WHEN r.kind='usage' THEN r.cache_priced ELSE 0 END) cache_priced"
-    summary = {k: v or 0 for k, v in dict(db.execute("SELECT " + fields + " FROM " + table + " r WHERE " + where, params).fetchone()).items()}
+        if table == 'metric_buckets':
+            fields += ',sum(r.paired_reasoning) paired_reasoning,sum(r.paired_output) paired_output,sum(r.paired_responses) paired_responses'
+            fields += ",sum(CASE WHEN r.kind='usage' THEN r.event_count ELSE 0 END) usage_observations"
+    summary = {k: v or 0 for k, v in dict(db.execute("SELECT " + fields + " FROM " + metric_source(table, where) + " WHERE " + where, params).fetchone()).items()}
     if extras is not None:
         extras.update(discount=summary.pop('cache_discount'), priced=summary.pop('cache_priced'))
+        if table == 'metric_buckets':
+            extras.update({name: summary.pop(name) for name in ('paired_reasoning', 'paired_output', 'paired_responses', 'usage_observations')})
     summary["cost"] = round(summary["cost"], 2)
     summary["chats"] = db.execute("SELECT count(DISTINCT c.session_id) FROM session_metadata c WHERE c.category='top_level' "
-        "AND c.segment_id IN (SELECT r.segment_id FROM " + table + " r WHERE " + where + ')', params).fetchone()[0]
+        "AND c.segment_id IN (SELECT r.segment_id FROM " + metric_source(table, where) + " WHERE " + where + ')', params).fetchone()[0]
     summary["priced_percent"] = round(summary["priced_tokens"] / summary["total_tokens"] * 100, 1) if summary["total_tokens"] else 0
     summary["change_coverage"] = "partial" if summary["unknown_edits"] or summary["unsupported_edits"] or summary["unknown_size_edits"] or summary['edit_completion_time_unavailable'] else "observed" if summary["lines_added"] or summary["lines_removed"] else "no_observed_changes"
     return summary

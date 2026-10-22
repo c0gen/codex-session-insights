@@ -1,12 +1,13 @@
 """Bounded analytics cache and credential-free last overview for startup."""
 from collections import OrderedDict
 from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 import json
 import os
 from pathlib import Path
 import sqlite3
 import threading
+import time
 
 from .query_snapshot import VERSION, context, identity
 FILTERS = ('range', 'project_id', 'model', 'source_id', 'provider', 'start', 'end')
@@ -46,7 +47,7 @@ class OverviewSnapshot:
         # Explicit allowlist: no account responses, credentials or provider setup.
         keys = ('summary', 'timeline', 'projects', 'models', 'heatmap', 'tiers', 'efforts', 'agents', 'highlights',
                 'equivalents', 'options', 'sources', 'timezone', 'revision', 'generated_at', 'date_bounds', 'demo',
-                'coverage', 'settings', 'filters', 'usage_metrics', 'daily_sessions', 'source_states', 'indexed_token_totals')
+                'coverage', 'settings', 'filters', 'usage_metrics', 'daily_sessions', 'source_states', 'indexed_token_totals', 'analytics_context')
         data = {k: deepcopy(value[k]) for k in keys if k in value}
         for source in data.get('sources', []):
             for key in ('root', 'detail', 'index_health', 'legacy_diagnostics'):
@@ -67,13 +68,30 @@ class OverviewSnapshot:
 
 
 class DashboardCache:
-    def __init__(self, store):
+    # Indexing changes the snapshot identity continuously. A background view
+    # recomputes at most this often, and never spends over a third of its time
+    # computing; clients keep the previous result, marked as refreshing.
+    MIN_INTERVAL = 2
+
+    def __init__(self, store, min_interval=MIN_INTERVAL, clock=time.monotonic):
         self.store, self.values, self.lock = store, OrderedDict(), threading.Lock()
         self.snapshot = OverviewSnapshot(store.directory)
         self.latest, self.pending, self.errors = {}, {}, {}
+        self.flights = {}
         self.pending_views = set()
         self.orders, self.sequence, self.snapshot_order = {}, 0, None
+        self.min_interval, self.clock = min_interval, clock
+        self.finished, self.durations = {}, {}
+        # Advances whenever a newer result is published, so clients poll a number.
+        self.generation = 0
+        self.closing = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='insights-analytics')
+
+    def _allowed(self, view_key):
+        finished = self.finished.get(view_key)
+        if not self.min_interval or finished is None:
+            return True
+        return self.clock() >= finished + max(self.min_interval, 2 * self.durations.get(view_key, 0))
 
     def key(self, filters):
         with self.store.connect() as db:
@@ -95,28 +113,53 @@ class DashboardCache:
             if key in self.errors:
                 raise ValueError(self.errors[key])
             previous = self.latest.get(view_key)
-            if background and previous:
-                if view_key not in self.pending_views:
+            if background and previous and not retry:
+                # Requests the user made themselves (retry) are never throttled.
+                if view_key not in self.pending_views and not self.closing.is_set() and (retry or self._allowed(view_key)):
                     self.pending_views.add(view_key)
                     self.pending[key] = self.executor.submit(self._refresh, filters, key, view_key)
                 return {**deepcopy(previous), 'analytics_refreshing': True}
-        return self._compute(filters, key, view_key)
+        return self._singleflight(filters, key, view_key)
+
+    def _singleflight(self, filters, key, view_key):
+        with self.lock:
+            future = self.flights.get(key)
+            owner = future is None
+            if owner:
+                future = self.flights[key] = Future()
+        if not owner:
+            return deepcopy(future.result())
+        try:
+            value = self._compute(filters, key, view_key)
+            future.set_result(value)
+            return value
+        except BaseException as error:
+            future.set_exception(error)
+            raise
+        finally:
+            with self.lock:
+                self.flights.pop(key, None)
 
     def _compute(self, filters, key, view_key):
         from .queries import dashboard
         with self.lock:
             self.sequence += 1
             sequence = self.sequence
+        started = self.clock()
         result = dashboard(self.store, filters)
         captured = result.snapshot_key
         value = dict(result)
         current = self.key(filters)
         order = (*captured[1:4], sequence)
         captured_view = (captured[0], json.dumps(filters, sort_keys=True))
+        with self.lock:
+            self.finished[captured_view] = self.clock()
+            self.durations[captured_view] = self.finished[captured_view] - started
         if captured[0] == current[0]:
             with self.lock:
                 self.values[captured] = deepcopy(value)
                 if order > self.orders.get(captured_view, (-1,)):
+                    self.generation += 1
                     self.latest[captured_view] = deepcopy(value)
                     self.orders[captured_view] = order
                     if filters.get('_view') == 'overview' and (self.snapshot_order is None or order > self.snapshot_order):
@@ -134,16 +177,31 @@ class DashboardCache:
 
     def _refresh(self, filters, key, view_key):
         try:
-            self._compute(filters, key, view_key)
+            if not self.closing.is_set():
+                self._singleflight(filters, key, view_key)
         except Exception:
-            with self.lock:
-                self.errors[key] = 'Could not refresh usage metrics. Retry to load the latest results.'
-                while len(self.errors) > 8:
-                    del self.errors[next(iter(self.errors))]
+            # A query interrupted by shutdown is not a result clients should see.
+            if not self.closing.is_set():
+                with self.lock:
+                    self.errors[key] = 'Could not refresh usage metrics. Retry to load the latest results.'
+                    while len(self.errors) > 8:
+                        del self.errors[next(iter(self.errors))]
+                    self.generation += 1  # Clients must request again to see the failure.
         finally:
             with self.lock:
                 self.pending.pop(key, None)
                 self.pending_views.discard(view_key)
 
-    def close(self):
-        self.executor.shutdown(wait=True, cancel_futures=True)
+    def begin_close(self):
+        """Stop scheduling and abort a running aggregate without waiting for it."""
+        self.closing.set()
+        readers = getattr(self.store, 'readers', None)
+        if readers is not None:
+            readers.interrupt()
+
+    def close(self, timeout=None):
+        self.begin_close()
+        with self.lock:
+            running = list(self.pending.values())
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        wait(running, timeout=timeout)

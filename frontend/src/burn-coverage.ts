@@ -7,6 +7,7 @@ export function burnCoverageHelp(rate: BurnRateEstimate): string {
   const reasons = coverage?.reasons.map(r => `${r.label}${r.count > 1 ? ` (${r.count})` : ''}${r.retry_at == null ? '' : `; next retry ${new Date(r.retry_at * 1000).toLocaleTimeString()}`}.`) || [];
   const checked = coverage?.checked_at;
   return [rate.partial ? 'Partial estimate.' : '', ...reasons,
+    ...(coverage?.freshness?.sources.map(s => `Source ${s.source_label ?? s.source_id}: ${s.state}; ${s.pending_files} pending files, ${s.pending_projections ?? 0} pending calculations${s.pending_age_seconds == null ? '' : ` for ${Math.round(s.pending_age_seconds)} seconds`}${s.checked_at == null ? '' : `; checked ${new Date(s.checked_at * 1000).toLocaleTimeString()}`}${s.last_progress_at == null ? '' : `; last progress ${new Date(s.last_progress_at * 1000).toLocaleTimeString()}`}.`) || []),
     rate.indexing?.historical_pending_files ? `${rate.indexing.historical_pending_files} verified historical files are being updated in the background.` : '',
     rate.indexing?.live_pending_files ? `${rate.indexing.live_pending_files} files may affect the current five-minute window and are waiting to be indexed.` : '',
     checked == null ? '' : `All included sources checked through ${new Date(checked * 1000).toLocaleString()}.`,
@@ -18,6 +19,10 @@ export function burnCoverageMarkup(rate: BurnRateEstimate, id: string): string {
   const labels = [...new Set(rate.coverage?.reasons.map(r => r.label) || [])];
   const badge = rate.partial ? ' <b class="allowance-stale">Partial</b>' : '';
   const stale = rate.status === 'stale' ? ' <b class="allowance-stale">Stale</b>' : '';
+  const updating = coverageState(rate) === 'updating' ? ' <b class="allowance-stale">Updating</b>' : '';
   const details = labels.length ? ` <button id="${esc(id)}-coverage" class="text-button burn-coverage" data-burn-sources title="${esc(burnCoverageHelp(rate))}">${esc(labels.join(' · '))}</button>` : '';
-  return badge + stale + details;
+  const history = rate.coverage?.reasons.some(r => r.code === 'history_conflict') ? ' <button class="text-button burn-coverage" data-burn-history>Review history</button>' : '';
+  return badge + stale + updating + details + history;
 }
+
+function coverageState(rate: BurnRateEstimate) { return rate.coverage?.freshness?.state ?? rate.indexing?.freshness; }

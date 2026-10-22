@@ -10,10 +10,7 @@ export function showJob(job: Job, cancel: () => void) {
     refresh.setAttribute("aria-label", automatic ? "Updating usage" : "Refresh insights");
     refresh.title = automatic ? "Updating usage" : "Refresh insights";
   }
-  const foreground = job.running && job.origin !== "automatic";
   showJobNotice(job, cancel);
-  const label = document.querySelector("#update-label");
-  if (label) label.textContent = foreground ? job.message : "Updated just now";
 }
 
 type Waiting = {

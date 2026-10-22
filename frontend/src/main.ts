@@ -29,9 +29,12 @@ import { TokenActivityPanel } from "./token-activity";
 import { DailySessionsPanel } from "./daily-sessions";
 import { CacheRatePanel } from "./cache-rate";
 import { renderProviderAllowances, bindProviderAllowances, bindProviderSetup } from "./provider-ui";
-import { FilterState, restoreFilters } from "./filter-state";
+import { FilterState, restoreFilters, type RequestIntent } from "./filter-state";
 import { FilterBar } from "./filter-bar";
+import { DashboardFeedback } from "./dashboard-feedback";
+import { ModalManager } from "./modal-manager";
 import { HistoryReview, coverageNotice } from "./history-review";
+import { DashboardViewCache, dashboardSkeleton } from "./dashboard-view-cache";
 
 const root = document.querySelector<HTMLDivElement>("#app")!;
 let storedFilters: string | null = null;
@@ -47,8 +50,25 @@ let data: Dashboard,
   basis: "total" | "output" = "total",
   modelMode: "tokens" | "cost" = "tokens";
 let lastCompleted = 0, polling = false;
-const updates = new DeferredReload(() => load(true));
-const filterBar = new FilterBar(filterState, () => { void load(); }, () => updates.finishEditing());
+let loadingView: string | null = null;
+// Live polling refreshes these fields itself; the rest decides whether a
+// background reload changed anything on screen.
+const LIVE_FIELDS = ["job", "provider_allowances", "usage_limits", "account_token_total", "desktop", "analytics_refreshing", "cached_at", "loaded_view"];
+let renderedContent = "";
+function contentSignature(value: object) {
+  const content: Record<string, unknown> = { ...value };
+  for (const key of LIVE_FIELDS) delete content[key];
+  return JSON.stringify(content);
+}
+// Matches the backend's minimum background recompute interval.
+const ANALYTICS_RETRY_MS = 2000;
+const viewCache = new DashboardViewCache();
+let renderedPage: string | null = null;
+let requestedGeneration = 0, analyticsRequestedAt = 0;
+const updates = new DeferredReload(priority => load(priority ? "refresh" : "background"));
+const filterBar = new FilterBar(filterState, () => { void load("apply"); }, () => updates.finishEditing());
+const dashboardFeedback = new DashboardFeedback(filterState, () => { void load("retry"); });
+const modals = new ModalManager(() => { void updates.flush(); });
 const feedback = new JobFeedback((message) => toast(message, true));
 const exportFeedback = new ExportFeedback();
 const historyReview = new HistoryReview(dialog, (name, args) => action(name, args), toast);
@@ -121,8 +141,20 @@ function scopeLabel() {
 
 function analyticsView() { return ["projects", "usage", "sources"].includes(page) ? page : "overview"; }
 function render() {
-  if (!data.readonly && data.loaded_view && data.loaded_view !== analyticsView()) { void load(); return; }
-  const view = captureView(root);
+  const destination = analyticsView();
+  const navigation = !data.readonly && !["accounts", "visualizations"].includes(page) && !!data.loaded_view && (data.loaded_view !== destination || loadingView !== null && loadingView !== destination);
+  const previousPage = renderedPage;
+  if (previousPage) viewCache.capture(previousPage, root);
+  const cached = navigation ? viewCache.read(destination, data) : null;
+  if (cached) data = { ...cached, loaded_view: destination };
+  const skeleton = navigation && !cached;
+  const activeView = captureView(root);
+  const savedView = viewCache.position(page);
+  // Filters are global drafts; tab-specific scroll/search must not restore old dates.
+  const view = previousPage === page ? activeView : savedView
+    ? { ...savedView, range: activeView.range, dates: activeView.dates, unsaved: activeView.unsaved }
+    : { ...activeView, x: 0, y: 0, focus: "", search: undefined, selection: null, scrolls: [], namedScrolls: [] };
+  renderedPage = page;
   worlds.detach(page === "visualizations" && !data.exporter);
   clearCharts();
   tokenActivity.unmount();
@@ -137,7 +169,7 @@ function render() {
     accounts: "Accounts",
     sources: data.exporter ? "Mac Exporter" : "Sources",
   }[page];
-  const content = {
+  const content = skeleton ? dashboardSkeleton() : {
     overview: () => overview(data, mode, basis, tokenActivity.render(data)),
     usage: () => usage(data, modelMode, dailySessions.render(data), cacheRate.render(data)),
     visualizations: () => worlds.render(),
@@ -145,19 +177,20 @@ function render() {
     accounts: () => accountsPage(),
     sources: () => exportFeedback.render() + sources(data),
   }[page as "overview"]();
-  root.innerHTML = `${sidebar()}<main class="main"><header class="page-header"><div><div class="title-row"><h1>${title}</h1>${data.demo ? '<span class="demo-pill">Demo data</span>' : data.readonly ? '<span class="demo-pill">Saved report</span>' : ""}</div><p>${page === "visualizations" ? "Text volume brought into perspective" : page === "sources" ? "Manage where your usage comes from" : page === "accounts" ? "Allowance, token history, and banked resets across your accounts" : esc(scopeLabel())}</p></div><div class="header-actions"><span id="update-label">${data.cached_at ? `Cached overview · ${esc(new Date(data.cached_at).toLocaleString())} · Updating…` : data.readonly ? "Saved snapshot" : "Updated just now"}</span>${!data.readonly ? `<button id="refresh" class="button icon-only" aria-label="Refresh insights">${icon("refresh", 21)}</button><button id="copy-summary-image" class="button icon-only" aria-label="Copy summary as an image" title="Copy summary as an image">${icon("copy", 20)}</button>${button("export-html", "Export HTML report", "file")}` : ""}</div></header><div id="summary-image-feedback" class="summary-image-feedback" role="status" hidden></div>${page === "overview" ? '<section id="limits-row" class="limits-row" aria-label="Plan limits and allowance, independent of filters" hidden></section>' : ""}${page !== "sources" && page !== "accounts" && (page !== "visualizations" || basis === "output") ? filterBar.render(data) : ""}<aside class="background-status" aria-label="Background updates"><p id="analytics-refresh-notice" class="fine-print" role="status" hidden></p><p id="cached-overview-notice" class="fine-print" role="status" hidden></p><div id="job-banner" class="job-banner" role="status" aria-live="polite" aria-atomic="true" hidden></div></aside><div id="dashboard-results" aria-busy="false">${coverageNotice(data)}${!data.summary.chats && !data.timeline.length && page === "overview" ? `<div class="empty-state panel"><h2>No usage in this view yet</h2><p>Choose another date range or add a folder in Sources. Your regular Codex folders are included automatically.</p><button data-page="sources" class="button primary">${icon("database")}Open Sources</button></div>` : ""}${page === "accounts" ? `<div id="provider-allowance-cards">${renderProviderAllowances(data.provider_allowances, undefined, data.timezone)}</div>` : ""}${page !== "accounts" && page !== "sources" && page !== "visualizations" ? metricCoverage(data) : ""}${content}</div><footer class="app-footer"><span>${icon("shield", 14)}Processed on this computer</span><span>Codex Session Insights · v${appVersion}</span></footer></main>`;
+  root.innerHTML = `${sidebar()}<main class="main"><header class="page-header"><div><div class="title-row"><h1>${title}</h1>${data.demo ? '<span class="demo-pill">Demo data</span>' : data.readonly ? '<span class="demo-pill">Saved report</span>' : ""}</div><p>${page === "visualizations" ? "Text volume brought into perspective" : page === "sources" ? "Manage where your usage comes from" : page === "accounts" ? "Allowance, token history, and banked resets across your accounts" : esc(scopeLabel())}</p></div><div class="header-actions"><span id="update-label"></span>${!data.readonly ? `<button id="refresh" class="button icon-only" aria-label="Refresh insights">${icon("refresh", 21)}</button><button id="copy-summary-image" class="button icon-only" aria-label="Copy summary as an image" title="Copy summary as an image">${icon("copy", 20)}</button>${button("export-html", "Export HTML report", "file")}` : ""}</div></header><div id="summary-image-feedback" class="summary-image-feedback" role="status" hidden></div>${page === "overview" ? '<section id="limits-row" class="limits-row" aria-label="Plan limits and allowance, independent of filters" hidden></section>' : ""}${page !== "sources" && page !== "accounts" && (page !== "visualizations" || basis === "output") ? filterBar.render(data) : ""}${dashboardFeedback.render()}<aside class="background-status" aria-label="Background updates"><p id="analytics-refresh-notice" class="fine-print" role="status" hidden></p><p id="cached-overview-notice" class="fine-print" role="status" hidden></p><div id="job-banner" class="job-banner" role="status" aria-live="polite" aria-atomic="true" hidden></div></aside><div id="dashboard-results" aria-busy="false">${skeleton ? "" : coverageNotice(data)}${!skeleton && !data.summary.chats && !data.timeline.length && page === "overview" ? `<div class="empty-state panel"><h2>No usage in this view yet</h2><p>Choose another date range or add a folder in Sources. Your regular Codex folders are included automatically.</p><button data-page="sources" class="button primary">${icon("database")}Open Sources</button></div>` : ""}${page === "accounts" ? `<div id="provider-allowance-cards">${renderProviderAllowances(data.provider_allowances, undefined, data.timezone)}</div>` : ""}${!skeleton && page !== "accounts" && page !== "sources" && page !== "visualizations" ? metricCoverage(data) : ""}${content}</div><footer class="app-footer"><span>${icon("shield", 14)}Processed on this computer</span><span>Codex Session Insights · v${appVersion}</span></footer></main>`;
   bind();
   filterBar.mount(data);
+  dashboardFeedback.update(data);
   summaryCopy.mount(data, page);
   document.querySelector("#export-html")?.toggleAttribute("hidden", page === "accounts");
   allowance.mount(data.usage_limits, !!(data.demo || data.exporter || data.readonly || page === "accounts"),
     data.provider_allowances, data.timezone, data.filters?.provider);
   accounts.mount(!!(data.exporter || data.readonly), data.timezone);
-  if (page === "overview") activity(data.timeline, mode, data.coverage.tokens?.state);
-  if (page === "overview") tokenActivity.mount(render);
-  if (page === "usage") modelChart(data, modelMode);
-  if (page === "usage") dailySessions.mount();
-  if (page === "usage") cacheRate.mount();
+  if (!skeleton && page === "overview") activity(data.timeline, mode, data.coverage.tokens?.state);
+  if (!skeleton && page === "overview") tokenActivity.mount(render);
+  if (!skeleton && page === "usage") modelChart(data, modelMode);
+  if (!skeleton && page === "usage") dailySessions.mount();
+  if (!skeleton && page === "usage") cacheRate.mount();
   if (page === "visualizations") worlds.mount(data, basis, next => { basis = next; render(); });
   if (data.readonly) {
     document
@@ -169,7 +202,11 @@ function render() {
       .forEach((s) => (s.disabled = true));
   }
   if (!data.readonly) { showJob(data.job); showAnalyticsNotices(data); }
-  restoreView(root, view);
+  if (view) restoreView(root, view); else window.scrollTo(0, 0);
+  if (skeleton) root.querySelector("#dashboard-results")?.setAttribute("aria-busy", "true");
+  // The destination shell and any compatible cached content are in the DOM
+  // before starting analytics for the new tab.
+  if (navigation && loadingView !== destination) void load("navigation");
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -186,33 +223,52 @@ function projectionLoading(message = "Updating usage index. Verifying the accept
   awaitingProjection = true;
   root.innerHTML = `<main class="main"><header class="page-header"><h1>Codex Session Insights</h1></header><section class="panel loading" role="status"><span class="spinner"></span>${esc(message)}</section></main>`;
 }
-async function load(automatic = false) {
+async function load(intent: RequestIntent) {
+  const automatic = intent === "background";
   let pending;
-  try { pending = filterState.begin(automatic); }
+  try { pending = filterState.begin(intent, analyticsView()); }
   catch (e) { toast(e instanceof Error ? e.message : String(e), true); return; }
   if (!pending) return;
+  const requestedView = analyticsView();
+  loadingView = requestedView;
   // Establish the user request before releasing any queued background reload.
   if (!automatic) updates.finishEditing();
   summaryCopy.setLoading(true); worlds.setLoading(true);
   if (data) {
-    if (automatic) filterBar.feedback();
-    else filterBar.refresh(data);
+    if (intent === "apply") filterBar.refresh(data);
+    dashboardFeedback.update(data);
   }
   try {
-    const requestedView = analyticsView();
+    if (automatic) analyticsRequestedAt = performance.now();
     const next = await getDashboard({ ...pending.filters, _view: requestedView, _background: true, _retry: !automatic });
-    if (!filterState.current(pending)) return;
+    if (!filterState.current(pending) || requestedView !== analyticsView()) return;
     // An editor may have opened while the dashboard query was in flight.
     if (automatic && updates.editing()) {
       filterState.finish(pending);
+      loadingView = null;
       summaryCopy.setLoading(false); worlds.setLoading(false);
-      filterBar.feedback();
+      dashboardFeedback.update(data);
       updates.request();
+      return;
+    }
+    loadingView = null;
+    const content = contentSignature(next);
+    if (automatic && data && data.loaded_view === requestedView && content === renderedContent) {
+      // The previous results are still current: update status, keep charts and focus.
+      filterState.accept(pending, next.filters ?? pending.filters);
+      awaitingProjection = false;
+      data.analytics_refreshing = next.analytics_refreshing;
+      data.cached_at = next.cached_at;
+      summaryCopy.setLoading(!!data.analytics_refreshing); worlds.setLoading(!!data.analytics_refreshing);
+      dashboardFeedback.update(data);
+      showAnalyticsNotices(data);
       return;
     }
     const applied = filterState.accept(pending, next.filters ?? pending.filters)!;
     awaitingProjection = false;
     data = { ...next, filters: applied, loaded_view: requestedView };
+    viewCache.save(requestedView, data);
+    renderedContent = content;
     if (!data.readonly) {
       try { localStorage.setItem("insights-filters", JSON.stringify(applied)); } catch { /* The view still works without preferences. */ }
     }
@@ -227,16 +283,17 @@ async function load(automatic = false) {
     }
   } catch (e) {
     if (!filterState.current(pending)) return;
+    loadingView = null;
     filterState.fail(pending, e instanceof Error ? e.message : String(e));
     summaryCopy.setLoading(false); worlds.setLoading(false);
-    filterBar.feedback();
+    if (data) dashboardFeedback.update(data);
     if (String(e).includes("Waiting for the accepted configuration to be verified")) projectionLoading();
     else if (data) toast(String(e), true);
     else
       root.innerHTML = `<div class="startup-error"><h1>Couldn’t open insights</h1><p>${esc(e)}</p><button onclick="location.reload()">Try again</button></div>`;
   }
 }
-async function action(name: string, args: unknown = {}, state?: (value: "queued" | "running") => void, completed?: (value: JobCompletion) => void) {
+async function action(name: string, args: unknown = {}, state?: (value: "queued" | "running") => void, completed?: (value: JobCompletion) => void, reload = true) {
   try {
     const result = await call<ActionResponse>(name, args);
     if (result?.status === "cancelled") return false;
@@ -253,21 +310,29 @@ async function action(name: string, args: unknown = {}, state?: (value: "queued"
       const finished = await completion;
       exportFeedback.observe(finished);
       completed?.(finished);
-      updates.request();
+      if (reload) updates.request(true);
       return finished.state === "completed";
     }
-    if (result?.status !== "cancelling") updates.request();
+    if (reload && result?.status !== "cancelling") updates.request(true);
     return true;
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e), true);
     return false;
   }
 }
+async function refreshDashboard() {
+  const interaction = filterState.interaction;
+  if (await action("refresh", {}, undefined, undefined, false) && interaction === filterState.interaction) {
+    await load("refresh");
+  }
+}
 function on(id: string, callback: () => void) {
   document.getElementById(id)?.addEventListener("click", callback);
 }
 function showJob(job: Job) {
+  if (data) data.job = job;
   updateJob(job, () => { void action("cancel"); });
+  dashboardFeedback.observe(job, data);
 }
 function openWidgetAccount(id: string) {
   updates.finishEditing();
@@ -282,6 +347,7 @@ function bind() {
     (b) =>
       (b.onclick = () => {
         updates.finishEditing();
+        filterState.interaction++;
         page = b.dataset.page!;
         render();
       }),
@@ -316,7 +382,7 @@ function bind() {
     const el = document.querySelector<HTMLElement>("#extra-equivalents")!;
     el.hidden = !el.hidden;
   });
-  on("refresh", () => page === "accounts" ? void call("account_refresh", { refresh_local: true }).then(() => accounts.poll()).catch(e => toast(String(e), true)) : action("refresh"));
+  on("refresh", () => page === "accounts" ? void call("account_refresh", { refresh_local: true }).then(() => accounts.poll()).catch(e => toast(String(e), true)) : refreshDashboard());
   on("review-history", () => { void historyReview.open(data.timezone); });
   on("review-history-banner", () => { void historyReview.open(data.timezone); });
   on("rebuild-index", () => action("refresh", { rebuild: true }));
@@ -326,7 +392,7 @@ function bind() {
       dialog("Configuration preview", `<pre>${esc(JSON.stringify(preview, null, 2))}</pre>`, "", () => {});
     } else {
       await action("provider_setup", { target, operation });
-      await load();
+      await load("refresh");
     }
   });
   on("add-source", () => dialog("Add session folder", `<label>Tool <select id="source-provider"><option value="codex">Codex</option><option value="claude_code">Claude Code</option><option value="antigravity">Antigravity (public transcripts)</option></select></label><p>For Antigravity, choose its brain folder. Public transcripts and official hooks supply recorded usage.</p>`, `<button id="source-choose" class="button primary">Choose folder</button>`, () => on("source-choose", () => {
@@ -339,6 +405,7 @@ function bind() {
   on("settings-open", settings);
   on("settings-inline", settings);
   on("export-html", () => {
+    if (!filterState.hasApplied) { toast("Wait for the dashboard to load before exporting."); return; }
     const exportFilters = filterState.exportSnapshot();
     dialog(
       "Export HTML report",
@@ -392,7 +459,7 @@ function bind() {
           return;
         filters.project_id = row.dataset.project!;
         page = "overview";
-        load();
+        void load("apply");
       }),
   );
   merges.bind(data);
@@ -403,18 +470,9 @@ function dialog(
   footer: string,
   bindDialog: () => void,
 ) {
-  document.querySelector("#dialog-root")!.innerHTML =
-    `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="panel-heading"><h2>${title}</h2><button id="dialog-close" class="icon-button" aria-label="Close dialog">${icon("close")}</button></div><div class="modal-body">${body}</div><div class="modal-footer">${footer}</div></section></div>`;
-  on("dialog-close", closeDialog);
-  bindDialog();
-  document
-    .querySelector<HTMLElement>(".modal input,.modal select,.modal button")
-    ?.focus();
+  modals.open(title, body, footer, bindDialog);
 }
-function closeDialog() {
-  document.querySelector("#dialog-root")!.innerHTML = "";
-  void updates.flush();
-}
+function closeDialog() { modals.close(); }
 function validTimezone(zone: string) {
   if (!zone) return false;
   try { new Intl.DateTimeFormat("en-US", { timeZone: zone }); return true; } catch { return false; }
@@ -511,9 +569,6 @@ function settings() {
     },
   );
 }
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDialog();
-});
 document.body.insertAdjacentHTML("beforeend", '<div id="dialog-root"></div><div id="toast" role="status" hidden></div>');
 root.innerHTML =
   '<main class="main"><header class="page-header"><h1>Codex Session Insights</h1></header><section class="panel loading"><span class="spinner"></span>Opening saved usage…</section></main>';
@@ -524,12 +579,13 @@ async function startDashboard() {
       if (boot.projection && !boot.projection.readable) { projectionLoading(); return; }
       if (boot.cached_overview) {
         data = { ...boot.cached_overview, loaded_view: "overview" };
+        viewCache.save("overview", data);
         render();
         summaryCopy.setLoading(true);
       }
     } catch { /* Older preview servers can still supply the dashboard. */ }
   }
-  await load();
+  await load("initial");
 }
 void startDashboard();
 window.addEventListener("pywebviewready", () => { if (data) summaryCopy.mount(data, page); });
@@ -542,6 +598,7 @@ interface LiveStatus {
   provider_allowances: ProviderAllowance[];
   account_token_total?: Dashboard["account_token_total"];
   accounts?: import("./account-types").AccountsSnapshot;
+  analytics_generation?: number;
 }
 async function pollLive() {
   if (polling || document.hidden || (!data && !awaitingProjection)) return;
@@ -554,7 +611,7 @@ async function pollLive() {
         projectionLoading(live.job.error ? `Index update failed: ${live.job.error}. Recovery will retry automatically.` : undefined);
         return;
       }
-      await load();
+      await load("refresh");
       return;
     }
     const job = live.job;
@@ -576,7 +633,18 @@ async function pollLive() {
     }
     const finished = (job.completed || []).filter(item => item.id > lastCompleted);
     for (const item of finished) lastCompleted = Math.max(lastCompleted, item.id);
-    if (job.revision !== data.revision || finished.some(item => item.origin !== "automatic" || page === "sources") || data.cached_at || data.analytics_refreshing) updates.request();
+    const generation = live.analytics_generation ?? 0;
+    // While previous results are shown, wait for the throttled recompute to
+    // publish instead of asking for the same stale payload every poll. Other
+    // views' results are irrelevant otherwise, so only revisions count then.
+    const stale = data.analytics_refreshing
+      ? generation > requestedGeneration || performance.now() - analyticsRequestedAt >= ANALYTICS_RETRY_MS
+      : job.revision !== data.revision;
+    if (!data.analytics_refreshing) requestedGeneration = generation;
+    if (stale || finished.some(item => item.origin !== "automatic" || page === "sources") || data.cached_at) {
+      requestedGeneration = generation;
+      updates.request(finished.some(item => item.state === "completed" && item.origin !== "automatic"));
+    }
     if (live.desktop.available) await pollDesktopSettings(settings, openWidgetAccount, live.desktop);
   } catch { /* Retain previous readings during close or a transient connection failure. */ }
   finally { polling = false; }
@@ -619,6 +687,7 @@ if (!window.__INSIGHTS_REPORT__) {
 
 // Coverage controls survive polling replacements of the burn rows.
 document.addEventListener("click", event => {
+  if ((event.target as Element | null)?.closest("[data-burn-history]")) { void historyReview.open(data.timezone); return; }
   if ((event.target as Element | null)?.closest("[data-burn-sources]")) {
     document.querySelector<HTMLButtonElement>('.nav-item[data-page="sources"]')?.click();
   }

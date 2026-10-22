@@ -1,13 +1,12 @@
 import type { Dashboard } from "./types";
 import { defaultFilters, FilterState } from "./filter-state";
 import { dateLabel, esc } from "./ui";
-import "./filter-bar.css";
 
 const fields = { range: "range", project: "project_id", model: "model", source: "source_id", provider: "provider" } as const;
 const ranges: [string, string][] = [["all", "All time"], ["today", "Today"], ["7", "Last 7 days"],
   ["30", "Last 30 days"], ["90", "Last 90 days"], ["custom", "Custom dates"]];
 
-/** Owns filter controls and request feedback independently of dashboard charts. */
+/** Owns draft filter controls independently of dashboard results. */
 export class FilterBar {
   constructor(private state: FilterState, private apply: () => void, private finishEditing: () => void) {}
 
@@ -30,8 +29,7 @@ export class FilterBar {
       ${changed ? '<button id="filters-reset" class="text-button">Reset filters</button>' : ""}
       <span class="date-caption">${esc(dates)}</span>
       ${filters.range === "custom" ? `<div class="date-fields"><label>From <input id="date-start" type="date" value="${esc(filters.start)}"></label><label>To <input id="date-end" type="date" value="${esc(filters.end)}"></label><button id="date-apply" class="button small">Apply</button></div>` : ""}
-      </div><div id="filter-feedback" class="filter-feedback" role="status" aria-live="polite" aria-atomic="true" hidden>
-      <span></span><button id="filters-retry" class="button small" hidden>Retry</button></div></div>`;
+      </div></div>`;
   }
 
   mount(data: Dashboard) {
@@ -60,9 +58,7 @@ export class FilterBar {
       });
       const apply = root.querySelector<HTMLButtonElement>("#date-apply");
       if (apply) apply.onclick = () => this.apply();
-      root.querySelector<HTMLButtonElement>("#filters-retry")!.onclick = () => this.apply();
     }
-    this.feedback();
   }
 
   refresh(data: Dashboard) {
@@ -74,19 +70,4 @@ export class FilterBar {
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
   }
 
-  feedback() {
-    const root = document.querySelector<HTMLElement>("#filter-bar");
-    if (!root) return;
-    const { loading, error } = this.state;
-    const feedback = root.querySelector<HTMLElement>("#filter-feedback")!;
-    // Routine refreshes use the header status without adding a row above metrics.
-    feedback.hidden = !error;
-    feedback.classList.toggle("error", !!error);
-    feedback.querySelector("span")!.textContent = error ? `Couldn’t update metrics. Showing previous results. ${error}` : "";
-    root.querySelector<HTMLButtonElement>("#filters-retry")!.hidden = !error;
-    document.querySelector("#dashboard-results")?.setAttribute("aria-busy", String(loading));
-    const label = document.querySelector("#update-label");
-    if (label && (loading || error)) label.textContent = loading ? "Updating metrics…" : "Update failed";
-    else if (label && !document.querySelector(".filters.readonly")) label.textContent = "Updated just now";
-  }
 }
